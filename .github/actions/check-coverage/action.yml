@@ -1,0 +1,97 @@
+name: 'Check Coverage'
+description: 'Generate coverage reports and check threshold'
+
+inputs:
+  features:
+    description: 'Features to enable for coverage'
+    required: false
+    default: '--all-features'
+  threshold:
+    description: 'Minimum coverage percentage threshold'
+    required: false
+    default: '80'
+
+outputs:
+  coverage:
+    description: 'Total coverage percentage'
+  line_coverage:
+    description: 'Line coverage percentage'
+  region_coverage:
+    description: 'Region coverage percentage'
+  function_coverage:
+    description: 'Function coverage percentage'
+  branch_coverage:
+    description: 'Branch coverage percentage'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+
+    - name: Generate coverage report
+      shell: bash
+      run: cargo llvm-cov ${{ inputs.features }} --workspace --lcov --output-path lcov.info
+
+    - name: Generate HTML report
+      shell: bash
+      run: cargo llvm-cov ${{ inputs.features }} --workspace --html --output-dir coverage-html
+
+    - name: Check coverage threshold
+      id: coverage
+      shell: bash
+      run: |
+        # Get coverage percentage
+        COVERAGE_OUTPUT=$(cargo llvm-cov ${{ inputs.features }} --workspace 2>&1)
+        echo "$COVERAGE_OUTPUT" | tee coverage-output.txt
+
+        # Extract the total line coverage percentage
+        COVERAGE=$(echo "$COVERAGE_OUTPUT" | grep -E "^TOTAL" | awk '{print $10}' | sed 's/%//')
+        
+        # Extract detailed coverage metrics
+        LINE_COV=$(echo "$COVERAGE_OUTPUT" | grep -E "^TOTAL" | awk '{print $2}' | sed 's/%//')
+        REGION_COV=$(echo "$COVERAGE_OUTPUT" | grep -E "^TOTAL" | awk '{print $4}' | sed 's/%//')
+        FUNCTION_COV=$(echo "$COVERAGE_OUTPUT" | grep -E "^TOTAL" | awk '{print $6}' | sed 's/%//')
+        BRANCH_COV=$(echo "$COVERAGE_OUTPUT" | grep -E "^TOTAL" | awk '{print $8}' | sed 's/%//')
+
+        if [ -z "$COVERAGE" ]; then
+          echo "::warning::Could not extract coverage percentage, skipping threshold check"
+          exit 0
+        fi
+
+        echo "Coverage: $COVERAGE%"
+        echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+        echo "line_coverage=$LINE_COV" >> $GITHUB_OUTPUT
+        echo "region_coverage=$REGION_COV" >> $GITHUB_OUTPUT
+        echo "function_coverage=$FUNCTION_COV" >> $GITHUB_OUTPUT
+        echo "branch_coverage=$BRANCH_COV" >> $GITHUB_OUTPUT
+
+        # Check if coverage is below threshold
+        if (( $(echo "$COVERAGE < ${{ inputs.threshold }}" | bc -l) )); then
+          echo "::error::Coverage $COVERAGE% is below ${{ inputs.threshold }}% threshold"
+          exit 1
+        fi
+
+        echo "::notice::Coverage $COVERAGE% meets ${{ inputs.threshold }}% threshold"
+
+    - name: Upload coverage output
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-output
+        path: coverage-output.txt
+        retention-days: 7
+
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: coverage-html/
+        retention-days: 30
+
+    - name: Upload lcov report
+      uses: actions/upload-artifact@v4
+      with:
+        name: lcov-report
+        path: lcov.info
+        retention-days: 30

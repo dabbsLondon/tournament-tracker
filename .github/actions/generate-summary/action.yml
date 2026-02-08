@@ -1,0 +1,182 @@
+name: 'Generate CI Summary'
+description: 'Generate detailed CI summary with test and coverage reports'
+
+inputs:
+  check_result:
+    description: 'Result of check job'
+    required: true
+  test_result:
+    description: 'Result of test job'
+    required: true
+  coverage_result:
+    description: 'Result of coverage job'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download test output
+      uses: actions/download-artifact@v4
+      with:
+        name: test-output
+        path: test-output
+
+    - name: Download coverage output
+      uses: actions/download-artifact@v4
+      with:
+        name: coverage-output
+        path: coverage-output
+
+    - name: Generate summary
+      shell: bash
+      run: |
+        SUMMARY_FILE="$GITHUB_STEP_SUMMARY"
+        
+        echo "# 🎯 CI Summary" >> "$SUMMARY_FILE"
+        echo "" >> "$SUMMARY_FILE"
+        
+        # Overall status
+        if [ "${{ inputs.check_result }}" == "success" ] && [ "${{ inputs.test_result }}" == "success" ] && [ "${{ inputs.coverage_result }}" == "success" ]; then
+          echo "## ✅ All Checks Passed" >> "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+        else
+          echo "## ❌ Some Checks Failed" >> "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+          echo "| Job | Status |" >> "$SUMMARY_FILE"
+          echo "|-----|--------|" >> "$SUMMARY_FILE"
+          echo "| Check | ${{ inputs.check_result == 'success' && '✅' || '❌' }} ${{ inputs.check_result }} |" >> "$SUMMARY_FILE"
+          echo "| Test | ${{ inputs.test_result == 'success' && '✅' || '❌' }} ${{ inputs.test_result }} |" >> "$SUMMARY_FILE"
+          echo "| Coverage | ${{ inputs.coverage_result == 'success' && '✅' || '❌' }} ${{ inputs.coverage_result }} |" >> "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+        fi
+        
+        # Test Results Section
+        echo "## 📊 Test Results" >> "$SUMMARY_FILE"
+        echo "" >> "$SUMMARY_FILE"
+        
+        if [ -f "test-output/test-output.txt" ]; then
+          TEST_OUTPUT=$(cat test-output/test-output.txt)
+          
+          # Extract test summary
+          TEST_SUMMARY=$(echo "$TEST_OUTPUT" | grep "test result:" | tail -1 || echo "")
+          if [ -n "$TEST_SUMMARY" ]; then
+            echo "$TEST_SUMMARY" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            
+            # Extract counts using awk (more reliable)
+            PASSED=$(echo "$TEST_SUMMARY" | awk '{for(i=1;i<=NF;i++){if($i=="passed"){print $(i-1); break}}}' || echo "0")
+            FAILED=$(echo "$TEST_SUMMARY" | awk '{for(i=1;i<=NF;i++){if($i=="failed"){print $(i-1); break}}}' || echo "0")
+            IGNORED=$(echo "$TEST_SUMMARY" | awk '{for(i=1;i<=NF;i++){if($i=="ignored"){print $(i-1); break}}}' || echo "0")
+            
+            echo "| Metric | Count |" >> "$SUMMARY_FILE"
+            echo "|--------|-------|" >> "$SUMMARY_FILE"
+            echo "| ✅ Passed | $PASSED |" >> "$SUMMARY_FILE"
+            echo "| ❌ Failed | $FAILED |" >> "$SUMMARY_FILE"
+            echo "| ⏭️ Ignored | $IGNORED |" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+          fi
+          
+          # Extract individual test results
+          TEST_LIST=$(echo "$TEST_OUTPUT" | grep -E "^test\s+.*\.\.\." | head -100 || echo "")
+          if [ -n "$TEST_LIST" ]; then
+            echo "### Individual Tests" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo "<details>" >> "$SUMMARY_FILE"
+            echo "<summary><strong>📋 View All Test Names ($(echo "$TEST_LIST" | wc -l) tests)</strong></summary>" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo '```' >> "$SUMMARY_FILE"
+            echo "$TEST_LIST" >> "$SUMMARY_FILE"
+            echo '```' >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo "</details>" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+          fi
+          
+          # Expandable full test output
+          echo "<details>" >> "$SUMMARY_FILE"
+          echo "<summary><strong>📋 View Full Test Output</strong></summary>" >> "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+          echo '```' >> "$SUMMARY_FILE"
+          # Extract just the test results section
+          echo "$TEST_OUTPUT" | sed -n '/running.*tests/,/test result:/p' >> "$SUMMARY_FILE" || echo "$TEST_OUTPUT" >> "$SUMMARY_FILE"
+          echo '```' >> "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+          echo "</details>" >> "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+        else
+          echo "⚠️ Test output not available" >> "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+        fi
+        
+        # Coverage Results Section
+        echo "## 📈 Coverage Report" >> "$SUMMARY_FILE"
+        echo "" >> "$SUMMARY_FILE"
+        
+        if [ -f "coverage-output/coverage-output.txt" ]; then
+          COV_OUTPUT=$(cat coverage-output/coverage-output.txt)
+          
+          # Extract coverage table
+          COV_TABLE=$(echo "$COV_OUTPUT" | grep -A 20 "^TOTAL" | head -2 || echo "")
+          
+          if [ -n "$COV_TABLE" ]; then
+            echo "### Coverage Metrics" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            
+            # Parse the TOTAL line
+            TOTAL_LINE=$(echo "$COV_OUTPUT" | grep "^TOTAL" || echo "")
+            if [ -n "$TOTAL_LINE" ]; then
+              LINE_COV=$(echo "$TOTAL_LINE" | awk '{print $2}')
+              REGION_COV=$(echo "$TOTAL_LINE" | awk '{print $4}')
+              FUNCTION_COV=$(echo "$TOTAL_LINE" | awk '{print $6}')
+              BRANCH_COV=$(echo "$TOTAL_LINE" | awk '{print $8}')
+              TOTAL_COV=$(echo "$TOTAL_LINE" | awk '{print $10}')
+              
+              echo "| Metric | Coverage |" >> "$SUMMARY_FILE"
+              echo "|--------|----------|" >> "$SUMMARY_FILE"
+              echo "| 📄 Lines | $LINE_COV |" >> "$SUMMARY_FILE"
+              echo "| 🗺️ Regions | $REGION_COV |" >> "$SUMMARY_FILE"
+              echo "| 🔧 Functions | $FUNCTION_COV |" >> "$SUMMARY_FILE"
+              echo "| 🌿 Branches | $BRANCH_COV |" >> "$SUMMARY_FILE"
+              echo "| **📊 Total** | **$TOTAL_COV** |" >> "$SUMMARY_FILE"
+              echo "" >> "$SUMMARY_FILE"
+              
+              # Coverage threshold status
+              TOTAL_NUM=$(echo "$TOTAL_COV" | sed 's/%//')
+              if (( $(echo "$TOTAL_NUM >= 80" | bc -l) )); then
+                echo "✅ **Coverage meets 80% threshold**" >> "$SUMMARY_FILE"
+              else
+                echo "⚠️ **Coverage below 80% threshold**" >> "$SUMMARY_FILE"
+              fi
+              echo "" >> "$SUMMARY_FILE"
+            fi
+            
+            # Expandable coverage details
+            echo "<details>" >> "$SUMMARY_FILE"
+            echo "<summary><strong>📋 View Detailed Coverage Report</strong></summary>" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo '```' >> "$SUMMARY_FILE"
+            echo "$COV_OUTPUT" >> "$SUMMARY_FILE"
+            echo '```' >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo "</details>" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+          else
+            echo "⚠️ Coverage data not available" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+          fi
+        else
+          echo "⚠️ Coverage output not available" >> "$SUMMARY_FILE"
+          echo "" >> "$SUMMARY_FILE"
+        fi
+        
+        # Artifacts section
+        echo "## 📦 Artifacts" >> "$SUMMARY_FILE"
+        echo "" >> "$SUMMARY_FILE"
+        echo "The following artifacts are available for download:" >> "$SUMMARY_FILE"
+        echo "" >> "$SUMMARY_FILE"
+        echo "- 📊 **Coverage Report (HTML)**: Available in Coverage job artifacts" >> "$SUMMARY_FILE"
+        echo "- 📄 **Coverage Report (LCOV)**: Available in Coverage job artifacts" >> "$SUMMARY_FILE"
+        echo "- 📋 **Test Output**: Available in Test job artifacts" >> "$SUMMARY_FILE"
+        echo "" >> "$SUMMARY_FILE"

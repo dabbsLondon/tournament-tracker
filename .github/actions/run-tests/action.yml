@@ -1,0 +1,59 @@
+name: 'Run Tests'
+description: 'Run Rust tests and extract results'
+
+inputs:
+  features:
+    description: 'Features to enable for tests'
+    required: false
+    default: '--all-features'
+  rust_backtrace:
+    description: 'RUST_BACKTRACE value'
+    required: false
+    default: '1'
+
+outputs:
+  passed:
+    description: 'Number of tests passed'
+  failed:
+    description: 'Number of tests failed'
+  ignored:
+    description: 'Number of tests ignored'
+  summary:
+    description: 'Test result summary line'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run tests
+      id: test
+      shell: bash
+      run: |
+        cargo test ${{ inputs.features }} --verbose -- --nocapture 2>&1 | tee test-output.txt
+        TEST_RESULT=$?
+        
+        # Extract test summary
+        if grep -q "test result:" test-output.txt; then
+          TEST_SUMMARY=$(grep "test result:" test-output.txt | tail -1)
+          echo "summary=$TEST_SUMMARY" >> $GITHUB_OUTPUT
+          
+          # Extract counts using awk (more reliable)
+          PASSED=$(echo "$TEST_SUMMARY" | awk '{for(i=1;i<=NF;i++){if($i=="passed"){print $(i-1); break}}}' || echo "0")
+          FAILED=$(echo "$TEST_SUMMARY" | awk '{for(i=1;i<=NF;i++){if($i=="failed"){print $(i-1); break}}}' || echo "0")
+          IGNORED=$(echo "$TEST_SUMMARY" | awk '{for(i=1;i<=NF;i++){if($i=="ignored"){print $(i-1); break}}}' || echo "0")
+          
+          echo "passed=$PASSED" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "ignored=$IGNORED" >> $GITHUB_OUTPUT
+        fi
+        
+        exit $TEST_RESULT
+      env:
+        RUST_BACKTRACE: ${{ inputs.rust_backtrace }}
+
+    - name: Upload test output
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-output
+        path: test-output.txt
+        retention-days: 7
