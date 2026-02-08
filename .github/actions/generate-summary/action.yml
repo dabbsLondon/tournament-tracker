@@ -57,17 +57,21 @@ runs:
         if [ -f "test-output/test-output.txt" ]; then
           TEST_OUTPUT=$(cat test-output/test-output.txt)
           
-          # Extract test summary
+          # Extract test summary line - get the last one (aggregate)
           TEST_SUMMARY=$(echo "$TEST_OUTPUT" | grep "test result:" | tail -1 || echo "")
           if [ -n "$TEST_SUMMARY" ]; then
-            echo "$TEST_SUMMARY" >> "$SUMMARY_FILE"
-            echo "" >> "$SUMMARY_FILE"
+            # Extract counts using grep for more reliable parsing
+            # Format: "test result: ok. 78 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;"
+            PASSED=$(echo "$TEST_SUMMARY" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' | head -1)
+            FAILED=$(echo "$TEST_SUMMARY" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' | head -1)
+            IGNORED=$(echo "$TEST_SUMMARY" | grep -oE '[0-9]+ ignored' | grep -oE '[0-9]+' | head -1)
             
-            # Extract counts using awk (more reliable)
-            PASSED=$(echo "$TEST_SUMMARY" | awk '{for(i=1;i<=NF;i++){if($i=="passed"){print $(i-1); break}}}' || echo "0")
-            FAILED=$(echo "$TEST_SUMMARY" | awk '{for(i=1;i<=NF;i++){if($i=="failed"){print $(i-1); break}}}' || echo "0")
-            IGNORED=$(echo "$TEST_SUMMARY" | awk '{for(i=1;i<=NF;i++){if($i=="ignored"){print $(i-1); break}}}' || echo "0")
+            # Ensure we have valid numbers
+            [ -z "$PASSED" ] && PASSED="0"
+            [ -z "$FAILED" ] && FAILED="0"
+            [ -z "$IGNORED" ] && IGNORED="0"
             
+            # Show summary table
             echo "| Metric | Count |" >> "$SUMMARY_FILE"
             echo "|--------|-------|" >> "$SUMMARY_FILE"
             echo "| ✅ Passed | $PASSED |" >> "$SUMMARY_FILE"
@@ -76,13 +80,12 @@ runs:
             echo "" >> "$SUMMARY_FILE"
           fi
           
-          # Extract individual test results
-          TEST_LIST=$(echo "$TEST_OUTPUT" | grep -E "^test\s+.*\.\.\." | head -100 || echo "")
+          # Extract individual test results (only test names, not the summary)
+          TEST_LIST=$(echo "$TEST_OUTPUT" | grep -E "^test\s+[a-zA-Z0-9_:]+\s+\.\.\." | grep -v "test result:" | head -200 || echo "")
           if [ -n "$TEST_LIST" ]; then
-            echo "### Individual Tests" >> "$SUMMARY_FILE"
-            echo "" >> "$SUMMARY_FILE"
+            TEST_COUNT=$(echo "$TEST_LIST" | wc -l | tr -d ' ')
             echo "<details>" >> "$SUMMARY_FILE"
-            echo "<summary><strong>📋 View All Test Names ($(echo "$TEST_LIST" | wc -l) tests)</strong></summary>" >> "$SUMMARY_FILE"
+            echo "<summary><strong>📋 View All Test Names ($TEST_COUNT tests)</strong></summary>" >> "$SUMMARY_FILE"
             echo "" >> "$SUMMARY_FILE"
             echo '```' >> "$SUMMARY_FILE"
             echo "$TEST_LIST" >> "$SUMMARY_FILE"
@@ -92,18 +95,19 @@ runs:
             echo "" >> "$SUMMARY_FILE"
           fi
           
-          # Expandable full test output
-          echo "<details>" >> "$SUMMARY_FILE"
-          echo "<summary><strong>📋 View Full Test Output</strong></summary>" >> "$SUMMARY_FILE"
-          echo "" >> "$SUMMARY_FILE"
-          echo "" >> "$SUMMARY_FILE"
-          echo '```' >> "$SUMMARY_FILE"
-          # Extract just the test results section
-          echo "$TEST_OUTPUT" | sed -n '/running.*tests/,/test result:/p' >> "$SUMMARY_FILE" || echo "$TEST_OUTPUT" >> "$SUMMARY_FILE"
-          echo '```' >> "$SUMMARY_FILE"
-          echo "" >> "$SUMMARY_FILE"
-          echo "</details>" >> "$SUMMARY_FILE"
-          echo "" >> "$SUMMARY_FILE"
+          # Expandable full test output (only if there are failures or for debugging)
+          if [ "$FAILED" != "0" ] || [ -z "$TEST_LIST" ]; then
+            echo "<details>" >> "$SUMMARY_FILE"
+            echo "<summary><strong>📋 View Full Test Output</strong></summary>" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo '```' >> "$SUMMARY_FILE"
+            # Show only relevant parts - skip compilation output
+            echo "$TEST_OUTPUT" | sed -n '/^running.*tests$/,/^test result:/p' >> "$SUMMARY_FILE" || echo "$TEST_OUTPUT" | tail -100 >> "$SUMMARY_FILE"
+            echo '```' >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+            echo "</details>" >> "$SUMMARY_FILE"
+            echo "" >> "$SUMMARY_FILE"
+          fi
         else
           echo "⚠️ Test output not available" >> "$SUMMARY_FILE"
           echo "" >> "$SUMMARY_FILE"
