@@ -57,11 +57,21 @@ runs:
         if [ -f "test-output/test-output.txt" ]; then
           TEST_OUTPUT=$(cat test-output/test-output.txt)
           
-          # Extract test summary line - get the last one (aggregate)
-          TEST_SUMMARY=$(echo "$TEST_OUTPUT" | grep "test result:" | tail -1 || echo "")
+          # Extract test summary - find the one with the most tests (main test suite)
+          MAX_PASSED=0
+          TEST_SUMMARY=""
+          
+          while IFS= read -r line; do
+            # Extract passed count from this line
+            LINE_PASSED=$(echo "$line" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' | head -1)
+            if [ -n "$LINE_PASSED" ] && [ "$LINE_PASSED" -gt "$MAX_PASSED" ]; then
+              MAX_PASSED=$LINE_PASSED
+              TEST_SUMMARY="$line"
+            fi
+          done < <(echo "$TEST_OUTPUT" | grep "test result:" || true)
+          
           if [ -n "$TEST_SUMMARY" ]; then
-            # Extract counts using grep for more reliable parsing
-            # Format: "test result: ok. 78 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;"
+            # Extract counts from the test result with most tests
             PASSED=$(echo "$TEST_SUMMARY" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' | head -1)
             FAILED=$(echo "$TEST_SUMMARY" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' | head -1)
             IGNORED=$(echo "$TEST_SUMMARY" | grep -oE '[0-9]+ ignored' | grep -oE '[0-9]+' | head -1)
