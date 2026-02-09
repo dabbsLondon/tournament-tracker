@@ -329,12 +329,9 @@ mod tests {
     async fn test_ingest_fixture_with_mock() {
         let backend: Arc<dyn AiBackend> = Arc::new(TestMockBackend::new());
 
-        let result = ingest_from_fixture(
-            "tests/fixtures/goonhammer_sample.html",
-            backend,
-        )
-        .await
-        .unwrap();
+        let result = ingest_from_fixture("tests/fixtures/goonhammer_sample.html", backend)
+            .await
+            .unwrap();
 
         assert_eq!(result.events_found, 2);
         assert!(result.placements_found > 0);
@@ -345,12 +342,10 @@ mod tests {
     async fn test_balance_ingest_with_mock() {
         let backend: Arc<dyn AiBackend> = Arc::new(TestMockBackend::new());
 
-        let result = ingest_balance_update(
-            "tests/fixtures/warhammer_community_balance.html",
-            backend,
-        )
-        .await
-        .unwrap();
+        let result =
+            ingest_balance_update("tests/fixtures/warhammer_community_balance.html", backend)
+                .await
+                .unwrap();
 
         assert_eq!(result.events_found, 1);
         assert!(result.errors.is_empty());

@@ -255,7 +255,9 @@ async fn main() -> Result<()> {
                         );
 
                         if !ingest::check_backend(&ollama).await {
-                            tracing::error!("Ollama not available. Start Ollama or use --use-ollama=false");
+                            tracing::error!(
+                                "Ollama not available. Start Ollama or use --use-ollama=false"
+                            );
                             return Ok(());
                         }
                         Arc::new(ollama)
