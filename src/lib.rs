@@ -15,7 +15,10 @@ pub mod agents;
 pub mod api;
 pub mod calculate;
 pub mod config;
+pub mod fetch;
+pub mod ingest;
 pub mod models;
 pub mod storage;
+pub mod sync;
 
 pub use models::*;

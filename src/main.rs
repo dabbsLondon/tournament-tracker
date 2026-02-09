@@ -1,6 +1,11 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use meta_agent::agents::backend::{AiBackend, OllamaBackend};
+use meta_agent::ingest::{self, TestMockBackend};
 
 #[derive(Parser)]
 #[command(name = "meta-agent")]
@@ -154,9 +159,24 @@ enum DebugAction {
 
     /// Show epoch timeline
     Epochs,
+
+    /// Test ingestion from a fixture file
+    TestIngest {
+        /// Path to HTML fixture
+        path: String,
+
+        /// Type: "events" or "balance"
+        #[arg(long, default_value = "events")]
+        ingest_type: String,
+
+        /// Use real Ollama backend (requires Ollama running)
+        #[arg(long)]
+        use_ollama: bool,
+    },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Initialize tracing
@@ -218,10 +238,56 @@ fn main() -> Result<()> {
                 }
                 DebugAction::Epochs => {
                     tracing::info!("Showing epoch timeline...");
+                    // TODO: Implement epochs display
+                    tracing::warn!("Epochs display not yet implemented");
+                }
+                DebugAction::TestIngest {
+                    path,
+                    ingest_type,
+                    use_ollama,
+                } => {
+                    let backend: Arc<dyn AiBackend> = if use_ollama {
+                        tracing::info!("Using Ollama backend...");
+                        let ollama = OllamaBackend::new(
+                            "http://localhost:11434".to_string(),
+                            "llama3.2".to_string(),
+                            120,
+                        );
+
+                        if !ingest::check_backend(&ollama).await {
+                            tracing::error!("Ollama not available. Start Ollama or use --use-ollama=false");
+                            return Ok(());
+                        }
+                        Arc::new(ollama)
+                    } else {
+                        tracing::info!("Using mock backend (for testing without AI)...");
+                        Arc::new(TestMockBackend::new())
+                    };
+
+                    let result = match ingest_type.as_str() {
+                        "balance" => ingest::ingest_balance_update(&path, backend).await,
+                        _ => ingest::ingest_from_fixture(&path, backend).await,
+                    };
+
+                    match result {
+                        Ok(r) => {
+                            println!("\n=== Ingestion Results ===");
+                            println!("Events found: {}", r.events_found);
+                            println!("Placements found: {}", r.placements_found);
+                            println!("Lists found: {}", r.lists_found);
+                            if !r.errors.is_empty() {
+                                println!("\nErrors:");
+                                for err in &r.errors {
+                                    println!("  - {}", err);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Ingestion failed: {}", e);
+                        }
+                    }
                 }
             }
-            // TODO: Implement debug commands
-            tracing::warn!("Debug commands not yet implemented");
         }
     }
 

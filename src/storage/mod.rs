@@ -6,6 +6,12 @@
 //! - Parquet analytics files
 //! - State/cursor files
 
+pub mod jsonl;
+pub mod parquet;
+
+pub use jsonl::{EntityType, JsonlReader, JsonlWriter};
+pub use parquet::{ParquetReader, ParquetWriter, TableType};
+
 use std::path::PathBuf;
 use thiserror::Error;
 

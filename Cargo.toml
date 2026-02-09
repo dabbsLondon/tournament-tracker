@@ -43,6 +43,9 @@ hex = "0.4"
 # UUID
 uuid = { version = "1", features = ["v4", "serde"] }
 
+# URL parsing
+url = { version = "2", features = ["serde"] }
+
 # File system
 glob = "0.3"
 

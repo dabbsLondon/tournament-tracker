@@ -3,6 +3,16 @@
 //! Agents extract structured data from unstructured content (HTML, PDFs)
 //! using AI models. All agents implement the `Agent` trait.
 
+pub mod backend;
+pub mod balance_watcher;
+pub mod duplicate_detector;
+pub mod event_scout;
+pub mod fact_checker;
+pub mod list_normalizer;
+pub mod result_harvester;
+
+pub use backend::{AiBackend, AiBackendConfig, ChatMessage, ChatRequest, ChatResponse};
+
 use async_trait::async_trait;
 use thiserror::Error;
 
