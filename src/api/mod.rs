@@ -3,13 +3,84 @@
 //! Axum-based HTTP API for querying tournament data,
 //! epoch information, and derived analytics.
 
+pub mod routes;
+pub mod state;
+
+use std::collections::HashSet;
+
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
+    routing::get,
+    Json, Router,
 };
 use serde::Serialize;
 use thiserror::Error;
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::ServeDir;
+use tower_http::trace::TraceLayer;
+
+use crate::models::EpochMapper;
+use crate::api::state::AppState;
+
+/// Build the full application router.
+pub fn build_router(state: AppState) -> Router {
+    let api = Router::new()
+        .route("/api/events", get(routes::events::list_events))
+        .route("/api/events/:id", get(routes::events::get_event))
+        .route("/api/meta/factions", get(routes::meta::faction_stats))
+        .route("/api/meta/factions/:name", get(routes::meta::faction_detail))
+        .route("/api/epochs", get(routes::epochs::list_epochs));
+
+    Router::new()
+        .merge(api)
+        .fallback_service(ServeDir::new("static"))
+        .layer(CorsLayer::new().allow_origin(Any))
+        .layer(TraceLayer::new_for_http())
+        .with_state(state)
+}
+
+/// Deduplicate entities by their ID field.
+/// Keeps the first occurrence of each ID.
+pub fn dedup_by_id<T, F>(entities: Vec<T>, id_fn: F) -> Vec<T>
+where
+    F: Fn(&T) -> &str,
+{
+    let mut seen = HashSet::new();
+    entities
+        .into_iter()
+        .filter(|e| seen.insert(id_fn(e).to_string()))
+        .collect()
+}
+
+/// Resolve an epoch parameter to an epoch ID string.
+///
+/// - `None` or `"current"` resolves to the latest epoch from the mapper,
+///   or `"current"` if the mapper is empty.
+/// - A specific ID is validated against the mapper if non-empty.
+pub fn resolve_epoch(param: Option<&str>, mapper: &EpochMapper) -> Result<String, ApiError> {
+    match param {
+        None | Some("current") | Some("") => {
+            if mapper.all_epochs().is_empty() {
+                Ok("current".to_string())
+            } else {
+                Ok(mapper
+                    .current_epoch()
+                    .map(|e| e.id.as_str().to_string())
+                    .unwrap_or_else(|| "current".to_string()))
+            }
+        }
+        Some(id) => {
+            if !mapper.all_epochs().is_empty() {
+                let eid = crate::models::EntityId::from(id);
+                if mapper.get_epoch(&eid).is_none() {
+                    return Err(ApiError::NotFound(format!("Unknown epoch: {}", id)));
+                }
+            }
+            Ok(id.to_string())
+        }
+    }
+}
 
 /// API error types.
 #[derive(Debug, Error)]
@@ -168,5 +239,23 @@ mod tests {
 
         assert!(meta.has_prev);
         assert!(!meta.has_next);
+    }
+
+    #[test]
+    fn test_dedup_by_id() {
+        #[derive(Debug, Clone)]
+        struct Item {
+            id: String,
+            val: i32,
+        }
+        let items = vec![
+            Item { id: "a".into(), val: 1 },
+            Item { id: "b".into(), val: 2 },
+            Item { id: "a".into(), val: 3 },
+        ];
+        let deduped = dedup_by_id(items, |i| &i.id);
+        assert_eq!(deduped.len(), 2);
+        assert_eq!(deduped[0].val, 1);
+        assert_eq!(deduped[1].val, 2);
     }
 }

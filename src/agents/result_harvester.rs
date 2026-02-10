@@ -124,8 +124,12 @@ impl ResultHarvesterAgent {
     }
 
     fn parse_response(&self, response: &str) -> Result<ResultHarvesterOutput, AgentError> {
-        let parsed: ResultHarvesterResponse = serde_json::from_str(response)
-            .map_err(|e| AgentError::ResponseParseError(format!("Invalid JSON: {}", e)))?;
+        let json = super::extract_json(response);
+        let parsed: ResultHarvesterResponse = serde_json::from_str(json)
+            .map_err(|e| {
+                tracing::warn!("Result Harvester JSON parse error. Response start: {}", &response[..response.len().min(200)]);
+                AgentError::ResponseParseError(format!("Invalid JSON: {}", e))
+            })?;
 
         let mut placements = Vec::new();
         let mut raw_lists = Vec::new();

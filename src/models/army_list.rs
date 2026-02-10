@@ -1,6 +1,6 @@
 //! Army list model.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -80,6 +80,12 @@ pub struct ArmyList {
     /// Original raw text (for audit)
     pub raw_text: String,
 
+    /// Player name (for matching to placements)
+    pub player_name: Option<String>,
+
+    /// Date the list was played (from the event)
+    pub event_date: Option<NaiveDate>,
+
     /// Source URL
     pub source_url: Option<String>,
 
@@ -119,6 +125,8 @@ impl ArmyList {
             total_points,
             units,
             raw_text,
+            player_name: None,
+            event_date: None,
             source_url: None,
             created_at: Utc::now(),
             extraction_confidence: Confidence::default(),
@@ -148,6 +156,18 @@ impl ArmyList {
     /// Builder method to set subfaction.
     pub fn with_subfaction(mut self, subfaction: String) -> Self {
         self.subfaction = Some(subfaction);
+        self
+    }
+
+    /// Builder method to set player name.
+    pub fn with_player_name(mut self, name: String) -> Self {
+        self.player_name = Some(name);
+        self
+    }
+
+    /// Builder method to set the date the list was played.
+    pub fn with_event_date(mut self, date: NaiveDate) -> Self {
+        self.event_date = Some(date);
         self
     }
 

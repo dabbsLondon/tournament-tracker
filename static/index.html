@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>40k Meta Tracker</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+
+// ── API Client ──────────────────────────────────────────────────
+
+const Api = {
+    async getEvents(page, pageSize, epoch, from, to) {
+        var params = 'page=' + (page||1) + '&page_size=' + (pageSize||20);
+        if (epoch && epoch !== 'current') params += '&epoch=' + encodeURIComponent(epoch);
+        if (from) params += '&from=' + from;
+        if (to) params += '&to=' + to;
+        const res = await fetch('/api/events?' + params);
+        if (!res.ok) throw new Error('Events API error: ' + res.status);
+        return res.json();
+    },
+    async getEvent(id, epoch) {
+        var params = '';
+        if (epoch && epoch !== 'current') params = '?epoch=' + encodeURIComponent(epoch);
+        const res = await fetch('/api/events/' + id + params);
+        if (!res.ok) throw new Error('Event API error: ' + res.status);
+        return res.json();
+    },
+    async getFactionStats(epoch, from, to) {
+        var parts = [];
+        if (epoch && epoch !== 'current') parts.push('epoch=' + encodeURIComponent(epoch));
+        if (from) parts.push('from=' + from);
+        if (to) parts.push('to=' + to);
+        var params = parts.length > 0 ? '?' + parts.join('&') : '';
+        const res = await fetch('/api/meta/factions' + params);
+        if (!res.ok) throw new Error('Meta API error: ' + res.status);
+        return res.json();
+    },
+    async getFactionDetail(name, epoch) {
+        var params = '';
+        if (epoch && epoch !== 'current') params = '?epoch=' + encodeURIComponent(epoch);
+        const res = await fetch('/api/meta/factions/' + encodeURIComponent(name) + params);
+        if (!res.ok) throw new Error('Faction API error: ' + res.status);
+        return res.json();
+    },
+    async getEpochs() {
+        const res = await fetch('/api/epochs');
+        if (!res.ok) throw new Error('Epochs API error: ' + res.status);
+        return res.json();
+    },
+    async getEpochs() {
+        const res = await fetch('/api/epochs');
+        if (!res.ok) throw new Error('Epochs API error: ' + res.status);
+        return res.json();
+    }
+};
+
+// ── Tier Helpers ────────────────────────────────────────────────
+
+var TIER_COLORS = ['#ff4444', '#ff8844', '#d4af37', '#7088a8', '#555577'];
+var TIER_LABELS = ['S', 'A', 'B', 'C', 'D'];
+var TIER_CUTS = [0.15, 0.40, 0.70, 0.90]; // percentile boundaries
+
+function assignTiers(factions, getValue) {
+    var items = factions.map(function(f, i) {
+        return { idx: i, val: getValue(f), count: f.count };
+    });
+    // Factions with < 3 appearances get D
+    var qualifying = items.filter(function(it) { return it.count >= 3; });
+    qualifying.sort(function(a, b) { return b.val - a.val; });
+    var n = qualifying.length;
+    var tiers = {};
+    for (var r = 0; r < n; r++) {
+        var pct = n > 1 ? r / (n - 1) : 0;
+        var tier;
+        if (pct <= TIER_CUTS[0]) tier = 0;
+        else if (pct <= TIER_CUTS[1]) tier = 1;
+        else if (pct <= TIER_CUTS[2]) tier = 2;
+        else if (pct <= TIER_CUTS[3]) tier = 3;
+        else tier = 4;
+        tiers[qualifying[r].idx] = tier;
+    }
+    // Insufficient data = D
+    for (var j = 0; j < items.length; j++) {
+        if (tiers[j] === undefined) tiers[j] = 4;
+    }
+    return tiers;
+}
+
+function tierColor(tierIdx) { return TIER_COLORS[tierIdx] || TIER_COLORS[4]; }
+function tierLabel(tierIdx) { return TIER_LABELS[tierIdx] || 'D'; }
+
+// ── Faction Chart ───────────────────────────────────────────────
+
+function MetaChart(props) {
+    var factions = props.factions;
+    var metric = props.metric; // 'meta_share' or 'win_rate'
+    var label = props.label;
+    var tooltipInfo = props.tooltipInfo;
+    var onSelectFaction = props.onSelectFaction;
+    var chartRef = React.useRef(null);
+    var chartInstance = React.useRef(null);
+    var topRef = React.useRef([]);
+
+    React.useEffect(function() {
+        if (!chartRef.current || !factions || factions.length === 0) return;
+
+        var getValue = function(f) { return f[metric]; };
+        var tiers = assignTiers(factions, getValue);
+
+        // Sort by value descending (highest first at top of chart)
+        var indexed = factions.map(function(f, i) { return { f: f, i: i }; });
+        indexed.sort(function(a, b) { return b.f[metric] - a.f[metric]; });
+        var top = indexed.slice(0, 15);
+        topRef.current = top;
+
+        if (chartInstance.current) {
+            chartInstance.current.destroy();
+        }
+
+        var ctx = chartRef.current.getContext('2d');
+        chartInstance.current = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: top.map(function(it) { return it.f.faction; }),
+                datasets: [{
+                    label: label,
+                    data: top.map(function(it) { return it.f[metric]; }),
+                    backgroundColor: top.map(function(it) { return tierColor(tiers[it.i]); }),
+                    borderColor: 'transparent',
+                    borderRadius: 4,
+                    barThickness: 18,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                onClick: function(evt, elements) {
+                    if (elements.length > 0 && onSelectFaction) {
+                        var idx = elements[0].index;
+                        var faction = topRef.current[idx].f.faction;
+                        onSelectFaction(faction);
+                    }
+                },
+                onHover: function(evt, elements) {
+                    evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+                },
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1a1a2e',
+                        titleColor: '#d4af37',
+                        bodyColor: '#e0e0e0',
+                        borderColor: '#2a2a4a',
+                        borderWidth: 1,
+                        callbacks: {
+                            afterLabel: function(context) {
+                                var it = top[context.dataIndex];
+                                var f = it.f;
+                                return 'Count: ' + f.count + '\nWins: ' + f.first_place_count + '\nTier: ' + tierLabel(tiers[it.i]);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: '#2a2a4a' },
+                        ticks: { color: '#888', font: { size: 11 } },
+                        title: { display: true, text: label, color: '#888', font: { size: 11 } }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { color: '#e0e0e0', font: { size: 12 } }
+                    }
+                }
+            }
+        });
+
+        return function() {
+            if (chartInstance.current) chartInstance.current.destroy();
+        };
+    }, [factions, metric]);
+
+    var height = Math.max(280, (factions ? Math.min(factions.length, 15) : 10) * 28 + 40);
+
+    return (
+        <div>
+            <div className="chart-container" style={{ height: height + 'px' }}>
+                <canvas ref={chartRef}></canvas>
+            </div>
+            <TierLegend tooltip={tooltipInfo} />
+        </div>
+    );
+}
+
+function TierLegend(props) {
+    return (
+        <div className="tier-legend">
+            <div className="tier-legend-row">
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#ff4444'}}></span>S</span>
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#ff8844'}}></span>A</span>
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#d4af37'}}></span>B</span>
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#7088a8'}}></span>C</span>
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#555577'}}></span>D</span>
+                <span className="tier-info-wrap">
+                    <span className="tier-info-btn">?</span>
+                    <span className="tier-tooltip">{props.tooltip}</span>
+                </span>
+            </div>
+        </div>
+    );
+}
+
+function SidebarCharts(props) {
+    var factions = props.factions;
+    var onSelectFaction = props.onSelectFaction;
+    var tabRef = React.useState('meta');
+    var activeTab = tabRef[0]; var setActiveTab = tabRef[1];
+
+    return (
+        <div>
+            <div className="chart-tabs">
+                <button className={'chart-tab' + (activeTab === 'meta' ? ' active' : '')} onClick={function() { setActiveTab('meta'); }}>Meta Share</button>
+                <button className={'chart-tab' + (activeTab === 'winrate' ? ' active' : '')} onClick={function() { setActiveTab('winrate'); }}>Win Rate</button>
+            </div>
+            {activeTab === 'meta' && (
+                <MetaChart factions={factions} metric="meta_share" label="Meta Share %" onSelectFaction={onSelectFaction} tooltipInfo="Colour shows tier based on meta share (% of all placements). Ranked by percentile: S = top 15%, A = next 25%, B = middle 30%, C = next 20%, D = bottom 10% or fewer than 3 appearances." />
+            )}
+            {activeTab === 'winrate' && (
+                <MetaChart factions={factions} metric="win_rate" label="Win Rate %" onSelectFaction={onSelectFaction} tooltipInfo="Colour shows tier based on win rate (1st place finishes / total appearances). Ranked by percentile: S = top 15%, A = next 25%, B = middle 30%, C = next 20%, D = bottom 10% or fewer than 3 appearances." />
+            )}
+        </div>
+    );
+}
+
+function FactionCards(props) {
+    var factions = props.factions;
+    var onSelectFaction = props.onSelectFaction;
+
+    if (!factions || factions.length === 0) {
+        return <div className="loading">No faction data</div>;
+    }
+
+    var metaTiers = assignTiers(factions, function(f) { return f.meta_share; });
+    var winTiers = assignTiers(factions, function(f) { return f.win_rate; });
+    var maxMeta = Math.max.apply(null, factions.map(function(f) { return f.meta_share; }));
+    var maxWin = Math.max.apply(null, factions.map(function(f) { return f.win_rate; }));
+    var maxTop4 = Math.max.apply(null, factions.map(function(f) { return f.top4_rate; }));
+
+    return (
+        <div className="faction-cards">
+            {factions.map(function(f, i) {
+                var t = metaTiers[i];
+                var metaPct = maxMeta > 0 ? (f.meta_share / maxMeta) * 100 : 0;
+                var winPct = maxWin > 0 ? (f.win_rate / maxWin) * 100 : 0;
+                var top4Pct = maxTop4 > 0 ? (f.top4_rate / maxTop4) * 100 : 0;
+
+                return (
+                    <div key={f.faction} className="faction-card" onClick={function() { onSelectFaction(f.faction); }} style={{cursor:'pointer'}}>
+                        <div className="faction-card-header">
+                            <span className="faction-name">{f.faction}</span>
+                            <span className="tier-badge" style={{background: tierColor(t)}}>{tierLabel(t)}</span>
+                        </div>
+                        <div className="faction-stats">
+                            <span><span className="faction-stat-value">{f.count}</span> players</span>
+                            <span><span className="faction-stat-value">{f.first_place_count}</span> wins</span>
+                            <span><span className="faction-stat-value">{f.top4_count}</span> top-4</span>
+                        </div>
+                        <div className="faction-card-bars">
+                            <div className="fc-bar-row">
+                                <span className="fc-bar-label">Meta</span>
+                                <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: metaPct + '%', background: tierColor(t)}}></div></div>
+                                <span className="fc-bar-val">{f.meta_share}%</span>
+                            </div>
+                            <div className="fc-bar-row">
+                                <span className="fc-bar-label">Wins</span>
+                                <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: winPct + '%', background: tierColor(winTiers[i])}}></div></div>
+                                <span className="fc-bar-val">{f.win_rate}%</span>
+                            </div>
+                            <div className="fc-bar-row">
+                                <span className="fc-bar-label">Top4</span>
+                                <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: top4Pct + '%', background: 'var(--tier-c)'}}></div></div>
+                                <span className="fc-bar-val">{f.top4_rate}%</span>
+                            </div>
+                        </div>
+                        {f.top_detachments && f.top_detachments.length > 0 && (
+                            <div className="fc-mini-chart">
+                                <div className="fc-mini-chart-title">Detachments</div>
+                                {f.top_detachments.map(function(d) {
+                                    var pct = f.top_detachments[0].count > 0 ? (d.count / f.top_detachments[0].count) * 100 : 0;
+                                    return (
+                                        <div key={d.name} className="fc-mini-bar-row">
+                                            <span className="fc-mini-bar-label">{d.name}</span>
+                                            <div className="fc-mini-bar-track"><div className="fc-mini-bar-fill" style={{width: pct + '%', background: 'var(--gold)'}}></div></div>
+                                            <span className="fc-mini-bar-val">{d.count}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        {f.top_units && f.top_units.length > 0 && (
+                            <div className="fc-mini-chart">
+                                <div className="fc-mini-chart-title">Popular Units</div>
+                                {f.top_units.slice(0, 4).map(function(u) {
+                                    var pct = f.top_units[0].count > 0 ? (u.count / f.top_units[0].count) * 100 : 0;
+                                    return (
+                                        <div key={u.name} className="fc-mini-bar-row">
+                                            <span className="fc-mini-bar-label">{u.name}</span>
+                                            <div className="fc-mini-bar-track"><div className="fc-mini-bar-fill" style={{width: pct + '%', background: 'var(--tier-c)'}}></div></div>
+                                            <span className="fc-mini-bar-val">{u.count}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+// ── Army List Display ───────────────────────────────────────────
+
+var ROLE_ORDER = [
+    { key: 'character', label: 'Characters', icon: '\u2694', match: function(kw) { return kw === 'Character' || kw === 'Epic Hero'; } },
+    { key: 'battleline', label: 'Battleline', icon: '\u2726', match: function(kw) { return kw === 'Battleline'; } },
+    { key: 'infantry', label: 'Infantry', icon: '\u2620', match: function(kw) { return kw === 'Infantry'; } },
+    { key: 'vehicle', label: 'Vehicles & Monsters', icon: '\u25C8', match: function(kw) { return kw === 'Vehicle' || kw === 'Monster' || kw === 'Walker'; } },
+    { key: 'transport', label: 'Transports', icon: '\u25A0', match: function(kw) { return kw === 'Dedicated Transport' || kw === 'Transport'; } },
+    { key: 'mounted', label: 'Mounted', icon: '\u2658', match: function(kw) { return kw === 'Mounted' || kw === 'Cavalry'; } },
+    { key: 'other', label: 'Other', icon: '\u2731', match: function() { return false; } },
+];
+
+function classifyUnit(unit) {
+    var kws = (unit.keywords || []);
+    // Characters first — even if also Infantry/Monster
+    for (var r = 0; r < ROLE_ORDER.length - 1; r++) {
+        for (var k = 0; k < kws.length; k++) {
+            if (ROLE_ORDER[r].match(kws[k])) return ROLE_ORDER[r].key;
+        }
+    }
+    return 'other';
+}
+
+function groupUnits(units) {
+    var groups = {};
+    ROLE_ORDER.forEach(function(r) { groups[r.key] = []; });
+    units.forEach(function(u) {
+        var role = classifyUnit(u);
+        groups[role].push(u);
+    });
+    // Return only non-empty groups in order
+    return ROLE_ORDER.filter(function(r) { return groups[r.key].length > 0; })
+        .map(function(r) { return { role: r, units: groups[r.key] }; });
+}
+
+function UnitCard(props) {
+    var u = props.unit;
+    var hasGear = u.wargear && u.wargear.length > 0;
+    var isChar = (u.keywords || []).some(function(k) { return k === 'Character' || k === 'Epic Hero'; });
+    var isEpic = (u.keywords || []).indexOf('Epic Hero') >= 0;
+
+    return (
+        <div className={'unit-card' + (isChar ? ' unit-card-character' : '')}>
+            <div className="unit-card-top">
+                <span className="unit-count-badge">{u.count}x</span>
+                <span className="unit-name">
+                    {u.name}
+                    {isEpic && <span className="epic-badge">EPIC</span>}
+                </span>
+                <span className="unit-pts">{u.points != null ? u.points + 'pts' : ''}</span>
+            </div>
+            {hasGear && (
+                <div className="unit-gear">
+                    {u.wargear.map(function(g, j) {
+                        return <span key={j} className="gear-tag">{g}</span>;
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ArmyListDisplay(props) {
+    var list = props.list;
+    if (!list) return null;
+
+    var rawRef = React.useState(false);
+    var showRaw = rawRef[0]; var setShowRaw = rawRef[1];
+
+    // If units array is populated, show rich structured view
+    if (list.units && list.units.length > 0) {
+        var faction = list.parsed_faction || 'Unknown Faction';
+        var detachment = list.parsed_detachment || null;
+        var totalPts = list.total_points || 0;
+        var modelCount = list.units.reduce(function(sum, u) { return sum + u.count; }, 0);
+        var groups = groupUnits(list.units);
+
+        return (
+            <div className="army-list-structured">
+                <div className="army-list-banner">
+                    <div className="army-list-banner-left">
+                        <span className="army-list-faction">{faction}</span>
+                        {detachment && <span className="army-list-detachment">{detachment}</span>}
+                    </div>
+                    <div className="army-list-banner-right">
+                        <span className="army-list-stat">{list.units.length} units</span>
+                        <span className="army-list-stat">{modelCount} models</span>
+                        <span className="army-list-points-badge">{totalPts}pts</span>
+                    </div>
+                </div>
+                <div className="unit-groups">
+                    {groups.map(function(g) {
+                        var groupPts = g.units.reduce(function(s, u) { return s + (u.points || 0); }, 0);
+                        return (
+                            <div key={g.role.key} className="unit-group">
+                                <div className="unit-group-header">
+                                    <span className="unit-group-icon">{g.role.icon}</span>
+                                    <span className="unit-group-label">{g.role.label}</span>
+                                    <span className="unit-group-count">{g.units.length}</span>
+                                    <span className="unit-group-pts">{groupPts}pts</span>
+                                </div>
+                                <div className="unit-group-cards">
+                                    {g.units.map(function(u, i) {
+                                        return <UnitCard key={i} unit={u} />;
+                                    })}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+                {list.raw_text && (
+                    <div className="raw-text-section">
+                        <button className="raw-text-toggle" onClick={function() { setShowRaw(!showRaw); }}>
+                            <span>View Raw Text</span>
+                            <span className={'chevron ' + (showRaw ? 'open' : '')}>{'\u25b6'}</span>
+                        </button>
+                        {showRaw && (
+                            <div className="army-list-content">{list.raw_text}</div>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    // Fallback: raw text only
+    return <div className="army-list-content">{list.raw_text}</div>;
+}
+
+// ── Faction Detail ──────────────────────────────────────────────
+
+function MiniBarChart(props) {
+    var items = props.items; // [{name, count}]
+    var label = props.label;
+    var color = props.color || 'var(--gold)';
+    if (!items || items.length === 0) return null;
+    var maxVal = items[0].count;
+
+    return (
+        <div className="mini-chart">
+            <div className="mini-chart-title">{label}</div>
+            {items.map(function(item, i) {
+                var pct = maxVal > 0 ? (item.count / maxVal) * 100 : 0;
+                return (
+                    <div key={i} className="mini-bar-row">
+                        <span className="mini-bar-label">{item.name}</span>
+                        <div className="mini-bar-track">
+                            <div className="mini-bar-fill" style={{width: pct + '%', background: color}}></div>
+                        </div>
+                        <span className="mini-bar-value">{item.count}</span>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function FactionDetail(props) {
+    var factionName = props.factionName;
+    var onBack = props.onBack;
+    var onSelectEvent = props.onSelectEvent;
+    var activeEpoch = props.activeEpoch;
+
+    var ref = React.useState(null);
+    var data = ref[0]; var setData = ref[1];
+    var ref2 = React.useState(true);
+    var loading = ref2[0]; var setLoading = ref2[1];
+    var ref3 = React.useState({});
+    var expanded = ref3[0]; var setExpanded = ref3[1];
+
+    React.useEffect(function() {
+        setLoading(true);
+        Api.getFactionDetail(factionName, activeEpoch).then(function(d) {
+            setData(d);
+            setLoading(false);
+        }).catch(function(err) {
+            console.error(err);
+            setLoading(false);
+        });
+    }, [factionName]);
+
+    function toggleList(id) {
+        setExpanded(function(prev) {
+            var next = Object.assign({}, prev);
+            next[id] = !prev[id];
+            return next;
+        });
+    }
+
+    if (loading) return <div className="loading"><div className="spinner"></div>Loading faction...</div>;
+    if (!data) return <div className="loading">No data</div>;
+
+    // Count lists matched
+    var listsMatched = data.winners.filter(function(w) { return w.army_list != null; }).length;
+
+    return (
+        <div className="detail-view">
+            <button className="back-btn" onClick={onBack}>{'\u2190'} Back</button>
+            <div className="detail-header">
+                <h2>{factionName}</h2>
+                <div className="event-meta">{data.winners.length} top-4 finishes · {listsMatched} lists</div>
+            </div>
+
+            {(data.detachment_breakdown && data.detachment_breakdown.length > 0) || (data.top_units && data.top_units.length > 0) ? (
+                <div className="faction-insights">
+                    <MiniBarChart items={data.detachment_breakdown} label="Detachments" color="var(--gold)" />
+                    <MiniBarChart items={data.top_units} label="Most Used Units" color="var(--tier-c)" />
+                </div>
+            ) : null}
+
+            <div className="section-title">Top Finishes</div>
+            <div className="event-list">
+                {data.winners.map(function(w, i) {
+                    var key = w.event_id + '-' + w.rank + '-' + i;
+                    var haslist = w.army_list != null;
+                    return (
+                        <div key={key} className={'placement-row' + (haslist ? '' : ' no-list')}>
+                            <div className={'placement-header' + (haslist ? ' clickable' : '')} onClick={haslist ? function() { toggleList(key); } : undefined}>
+                                <span className={'rank-cell ' + (w.rank <= 3 ? 'rank-' + w.rank : '')}>#{w.rank}</span>
+                                <span className="placement-player">{w.player_name}</span>
+                                <span className="placement-event-link" onClick={function(e) { e.stopPropagation(); onSelectEvent(w.event_id); }}>{w.event_name}</span>
+                                <span className="placement-det">{w.detachment || '\u2014'}</span>
+                                {w.event_date ? <span className="placement-date">{w.event_date}</span> : null}
+                                {haslist ? <span className={'list-indicator ' + (expanded[key] ? 'open' : '')} title="View army list">{'\u25b6'}</span> : null}
+                            </div>
+                            {haslist && expanded[key] ? (
+                                <ArmyListDisplay list={w.army_list} />
+                            ) : null}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+// ── Event List ──────────────────────────────────────────────────
+
+function EventList(props) {
+    var events = props.events;
+    var pagination = props.pagination;
+    var onPageChange = props.onPageChange;
+    var onSelectEvent = props.onSelectEvent;
+
+    if (!events) return <div className="loading"><div className="spinner"></div>Loading events...</div>;
+    if (events.length === 0) return <div className="loading">No events found</div>;
+
+    return (
+        <div>
+            <div className="event-list">
+                {events.map(function(event) {
+                    return (
+                        <div key={event.id} className="event-card" onClick={function() { onSelectEvent(event.id); }}>
+                            <div className="event-card-header">
+                                <span className="event-name">{event.name}</span>
+                                {event.player_count ? <span className="event-players">{event.player_count} players</span> : null}
+                            </div>
+                            <div className="event-meta">
+                                {event.date}
+                                {event.location ? ' \u00b7 ' + event.location : ''}
+                                {event.round_count ? ' \u00b7 ' + event.round_count + ' rounds' : ''}
+                            </div>
+                            {event.winner ? (
+                                <div className="event-winner">
+                                    <span className="event-winner-label">Winner: </span>
+                                    {event.winner.player_name} ({event.winner.faction}
+                                    {event.winner.detachment ? ' \u2014 ' + event.winner.detachment : ''})
+                                </div>
+                            ) : null}
+                        </div>
+                    );
+                })}
+            </div>
+            {pagination && pagination.total_pages > 1 ? (
+                <div className="pagination">
+                    <button disabled={!pagination.has_prev} onClick={function() { onPageChange(pagination.page - 1); }}>{'\u2190'} Prev</button>
+                    <span className="pagination-info">Page {pagination.page} of {pagination.total_pages}</span>
+                    <button disabled={!pagination.has_next} onClick={function() { onPageChange(pagination.page + 1); }}>Next {'\u2192'}</button>
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+// ── Event Detail ────────────────────────────────────────────────
+
+function EventDetail(props) {
+    var eventId = props.eventId;
+    var onBack = props.onBack;
+    var activeEpoch = props.activeEpoch;
+
+    var ref = React.useState(null);
+    var event = ref[0]; var setEvent = ref[1];
+    var ref2 = React.useState(true);
+    var loading = ref2[0]; var setLoading = ref2[1];
+    var ref3 = React.useState({});
+    var expandedLists = ref3[0]; var setExpandedLists = ref3[1];
+
+    React.useEffect(function() {
+        setLoading(true);
+        Api.getEvent(eventId, activeEpoch).then(function(data) {
+            setEvent(data);
+            setLoading(false);
+        }).catch(function(err) {
+            console.error(err);
+            setLoading(false);
+        });
+    }, [eventId]);
+
+    function toggleList(key) {
+        setExpandedLists(function(prev) {
+            var next = Object.assign({}, prev);
+            next[key] = !prev[key];
+            return next;
+        });
+    }
+
+    if (loading) return <div className="loading"><div className="spinner"></div>Loading event...</div>;
+    if (!event) return <div className="loading">Event not found</div>;
+
+    return (
+        <div className="detail-view">
+            <button className="back-btn" onClick={onBack}>{'\u2190'} Back to Events</button>
+            <div className="detail-header">
+                <h2>{event.name}</h2>
+                <div className="event-meta">
+                    {event.date}
+                    {event.location ? ' \u00b7 ' + event.location : ''}
+                    {event.player_count ? ' \u00b7 ' + event.player_count + ' players' : ''}
+                    {event.round_count ? ' \u00b7 ' + event.round_count + ' rounds' : ''}
+                </div>
+            </div>
+
+            {event.placements && event.placements.length > 0 ? (
+                <div>
+                    <div className="section-title">Placements</div>
+                    {event.placements.map(function(p, i) {
+                        var haslist = p.army_list != null;
+                        var key = 'p-' + i;
+                        return (
+                            <div key={i} className="placement-row">
+                                <div className={'placement-header' + (haslist ? ' clickable' : '')} onClick={haslist ? function() { toggleList(key); } : undefined}>
+                                    <span className={'rank-cell ' + (p.rank <= 3 ? 'rank-' + p.rank : '')}>#{p.rank}</span>
+                                    <span className="placement-player">{p.player_name}</span>
+                                    <span className="placement-faction">{p.faction}</span>
+                                    <span className="placement-det">{p.detachment || '\u2014'}</span>
+                                    <span className="placement-record">
+                                        {p.record ? p.record.wins + '-' + p.record.losses + '-' + p.record.draws : '\u2014'}
+                                    </span>
+                                    {haslist ? <span className={'chevron ' + (expandedLists[key] ? 'open' : '')}>{'\u25b6'}</span> : <span className="chevron-placeholder"></span>}
+                                </div>
+                                {haslist && expandedLists[key] ? (
+                                    <ArmyListDisplay list={p.army_list} />
+                                ) : null}
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+// ── Main App ────────────────────────────────────────────────────
+
+// Helper: convert date string to days-since-epoch for slider
+function dateToDays(dateStr) {
+    return Math.floor(new Date(dateStr + 'T00:00:00').getTime() / 86400000);
+}
+function daysToDate(days) {
+    var d = new Date(days * 86400000);
+    return d.toISOString().slice(0, 10);
+}
+
+function TimeSlider(props) {
+    var minDate = props.minDate;
+    var maxDate = props.maxDate;
+    var fromDate = props.fromDate;
+    var toDate = props.toDate;
+    var onChange = props.onChange;
+
+    var minDays = dateToDays(minDate);
+    var maxDays = dateToDays(maxDate);
+
+    return (
+        <div className="time-slider">
+            <div className="time-slider-labels">
+                <span>{fromDate}</span>
+                <span>{toDate}</span>
+            </div>
+            <div className="time-slider-tracks">
+                <input type="range" className="slider-from" min={minDays} max={maxDays}
+                    value={dateToDays(fromDate)}
+                    onChange={function(e) {
+                        var newFrom = daysToDate(Number(e.target.value));
+                        if (newFrom <= toDate) onChange(newFrom, toDate);
+                    }}
+                />
+                <input type="range" className="slider-to" min={minDays} max={maxDays}
+                    value={dateToDays(toDate)}
+                    onChange={function(e) {
+                        var newTo = daysToDate(Number(e.target.value));
+                        if (newTo >= fromDate) onChange(fromDate, newTo);
+                    }}
+                />
+            </div>
+        </div>
+    );
+}
+
+function App() {
+    var ref1 = React.useState(null); var factions = ref1[0]; var setFactions = ref1[1];
+    var ref2 = React.useState([]); var epochs = ref2[0]; var setEpochs = ref2[1];
+    var ref3 = React.useState(null); var events = ref3[0]; var setEvents = ref3[1];
+    var ref4 = React.useState(null); var pagination = ref4[0]; var setPagination = ref4[1];
+    var ref5 = React.useState(null); var selectedEvent = ref5[0]; var setSelectedEvent = ref5[1];
+    var ref6 = React.useState(null); var selectedFaction = ref6[0]; var setSelectedFaction = ref6[1];
+    var ref7 = React.useState(true); var loading = ref7[0]; var setLoading = ref7[1];
+    var ref8 = React.useState('current'); var activeEpoch = ref8[0]; var setActiveEpoch = ref8[1];
+    var ref9 = React.useState(null); var dateFrom = ref9[0]; var setDateFrom = ref9[1];
+    var ref10 = React.useState(null); var dateTo = ref10[0]; var setDateTo = ref10[1];
+    var ref11 = React.useState(null); var dateMin = ref11[0]; var setDateMin = ref11[1];
+    var ref12 = React.useState(null); var dateMax = ref12[0]; var setDateMax = ref12[1];
+    var debounceRef = React.useRef(null);
+
+    function loadData(epoch, from, to) {
+        return Promise.all([
+            Api.getFactionStats(epoch, from, to),
+            Api.getEvents(1, 20, epoch, from, to),
+        ]).then(function(results) {
+            setFactions(results[0].factions);
+            setEvents(results[1].events);
+            setPagination(results[1].pagination);
+            // Set date range from events if not set
+            if (results[1].events.length > 0 && !from) {
+                var dates = results[1].events.map(function(e) { return e.date; }).sort();
+                // Get full range from pagination (all pages)
+                var allMin = dates[dates.length - 1]; // events sorted desc
+                var allMax = dates[0];
+                // Use epoch dates if available
+                var activeEp = epochs.find(function(ep) { return ep.id === (epoch || activeEpoch); });
+                if (activeEp && activeEp.start_date) allMin = activeEp.start_date;
+                if (activeEp && activeEp.end_date) allMax = activeEp.end_date;
+                else if (!activeEp || !activeEp.end_date) allMax = new Date().toISOString().slice(0, 10);
+                setDateMin(allMin);
+                setDateMax(allMax);
+                setDateFrom(allMin);
+                setDateTo(allMax);
+            }
+        });
+    }
+
+    React.useEffect(function() {
+        Promise.all([
+            Api.getEpochs(),
+            Api.getFactionStats(),
+            Api.getEvents(1, 20),
+        ]).then(function(results) {
+            var epochList = results[0].epochs;
+            setEpochs(epochList);
+            var current = epochList.find(function(e) { return e.is_current; });
+            if (current) setActiveEpoch(current.id);
+            setFactions(results[1].factions);
+            setEvents(results[2].events);
+            setPagination(results[2].pagination);
+            // Set initial date range
+            if (results[2].events.length > 0) {
+                var dates = results[2].events.map(function(e) { return e.date; }).sort();
+                var minD = current && current.start_date ? current.start_date : dates[0];
+                var maxD = new Date().toISOString().slice(0, 10);
+                setDateMin(minD);
+                setDateMax(maxD);
+                setDateFrom(minD);
+                setDateTo(maxD);
+            }
+            setLoading(false);
+        }).catch(function(err) {
+            console.error('Failed to load data:', err);
+            setLoading(false);
+        });
+    }, []);
+
+    function handleEpochChange(epochId) {
+        setActiveEpoch(epochId);
+        setSelectedEvent(null);
+        setSelectedFaction(null);
+        setDateFrom(null);
+        setDateTo(null);
+        setDateMin(null);
+        setDateMax(null);
+        loadData(epochId).catch(function(err) {
+            console.error('Failed to load epoch data:', err);
+        });
+    }
+
+    function handleDateRangeChange(from, to) {
+        setDateFrom(from);
+        setDateTo(to);
+        // Debounce the API calls
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(function() {
+            Promise.all([
+                Api.getFactionStats(activeEpoch, from, to),
+                Api.getEvents(1, 20, activeEpoch, from, to),
+            ]).then(function(results) {
+                setFactions(results[0].factions);
+                setEvents(results[1].events);
+                setPagination(results[1].pagination);
+            });
+        }, 300);
+    }
+
+    function handlePageChange(newPage) {
+        Api.getEvents(newPage, 20, activeEpoch, dateFrom, dateTo).then(function(data) {
+            setEvents(data.events);
+            setPagination(data.pagination);
+        });
+    }
+
+    function handleSelectEvent(id) {
+        setSelectedEvent(id);
+        setSelectedFaction(null);
+    }
+
+    function handleSelectFaction(name) {
+        setSelectedFaction(name);
+        setSelectedEvent(null);
+    }
+
+    function handleBack() {
+        setSelectedEvent(null);
+        setSelectedFaction(null);
+    }
+
+    if (loading) {
+        return (
+            <div>
+                <div className="header"><h1>40K META TRACKER</h1></div>
+                <div className="loading" style={{ height: '80vh' }}>
+                    <div className="spinner"></div>Loading dashboard...
+                </div>
+            </div>
+        );
+    }
+
+    var mainContent;
+    if (selectedEvent) {
+        mainContent = <EventDetail eventId={selectedEvent} onBack={handleBack} activeEpoch={activeEpoch} />;
+    } else if (selectedFaction) {
+        mainContent = <FactionDetail factionName={selectedFaction} onBack={handleBack} onSelectEvent={handleSelectEvent} activeEpoch={activeEpoch} />;
+    } else {
+        mainContent = (
+            <div>
+                <h2>Recent Tournaments</h2>
+                <EventList events={events} pagination={pagination} onPageChange={handlePageChange} onSelectEvent={handleSelectEvent} />
+            </div>
+        );
+    }
+
+    return (
+        <div>
+            <div className="header">
+                <h1>40K META TRACKER</h1>
+                <div className="epoch-bar">
+                    {epochs.filter(function(epoch) { return epoch.event_count > 0; }).map(function(epoch) {
+                        var isActive = epoch.id === activeEpoch;
+                        var dateRange = '';
+                        if (epoch.start_date) {
+                            dateRange = epoch.start_date + ' \u2013 ' + (epoch.end_date || 'now');
+                        }
+                        return (
+                            <span key={epoch.id}
+                                className={'epoch-pill ' + (isActive ? 'active' : '')}
+                                onClick={function() { handleEpochChange(epoch.id); }}>
+                                <span className="epoch-pill-label">{epoch.label}</span>
+                                {dateRange && <span className="epoch-pill-dates">{dateRange}</span>}
+                                <span className="epoch-pill-count">{epoch.event_count} events</span>
+                            </span>
+                        );
+                    })}
+                </div>
+                {dateMin && dateMax && (
+                    <TimeSlider minDate={dateMin} maxDate={dateMax} fromDate={dateFrom} toDate={dateTo} onChange={handleDateRangeChange} />
+                )}
+            </div>
+            <div className="layout">
+                <div className="sidebar">
+                    <SidebarCharts factions={factions} onSelectFaction={handleSelectFaction} />
+                    <h2 style={{marginTop: '8px'}}>Factions</h2>
+                    <FactionCards factions={factions} onSelectFaction={handleSelectFaction} />
+                </div>
+                <div className="main">
+                    {mainContent}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+var root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+
+    </script>
+</body>
+</html>

@@ -99,6 +99,44 @@ pub trait Agent {
     }
 }
 
+/// Extract JSON from an AI response that may be wrapped in markdown code fences.
+///
+/// Handles responses like:
+/// - `{"key": "value"}` (plain JSON)
+/// - ````json\n{"key": "value"}\n```` (markdown code fences)
+/// - `Here is the result:\n{"key": "value"}` (text before JSON)
+pub fn extract_json(response: &str) -> &str {
+    let trimmed = response.trim();
+
+    // Strip markdown code fences: ```json ... ``` or ``` ... ```
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        // Skip optional language tag (e.g., "json")
+        let content = if let Some(after_newline) = rest.find('\n') {
+            &rest[after_newline + 1..]
+        } else {
+            rest
+        };
+        // Strip trailing ```
+        if let Some(end) = content.rfind("```") {
+            return content[..end].trim();
+        }
+        return content.trim();
+    }
+
+    // Find first { or [ which starts JSON
+    if let Some(start) = trimmed.find(['{', '[']) {
+        let json_part = &trimmed[start..];
+        // Find the matching closing brace/bracket from the end
+        let open_char = json_part.chars().next().unwrap();
+        let close_char = if open_char == '{' { '}' } else { ']' };
+        if let Some(end) = json_part.rfind(close_char) {
+            return &json_part[..=end];
+        }
+    }
+
+    trimmed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +146,35 @@ mod tests {
         let policy = RetryPolicy::default();
         assert_eq!(policy.max_retries, 3);
         assert_eq!(policy.initial_delay_ms, 1000);
+    }
+
+    #[test]
+    fn test_extract_json_plain() {
+        assert_eq!(extract_json(r#"{"key": "value"}"#), r#"{"key": "value"}"#);
+    }
+
+    #[test]
+    fn test_extract_json_code_fence() {
+        let input = "```json\n{\"events\": []}\n```";
+        assert_eq!(extract_json(input), r#"{"events": []}"#);
+    }
+
+    #[test]
+    fn test_extract_json_code_fence_no_lang() {
+        let input = "```\n{\"events\": []}\n```";
+        assert_eq!(extract_json(input), r#"{"events": []}"#);
+    }
+
+    #[test]
+    fn test_extract_json_text_before() {
+        let input = "Here is the JSON:\n{\"events\": []}";
+        assert_eq!(extract_json(input), r#"{"events": []}"#);
+    }
+
+    #[test]
+    fn test_extract_json_array() {
+        let input = "Result:\n[1, 2, 3]";
+        assert_eq!(extract_json(input), "[1, 2, 3]");
     }
 
     #[test]

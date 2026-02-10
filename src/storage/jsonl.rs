@@ -293,6 +293,24 @@ pub fn entity_path(config: &StorageConfig, entity: EntityType, epoch_id: &str) -
         .join(entity.filename())
 }
 
+/// Read significant events from the global file.
+pub fn read_significant_events(
+    config: &StorageConfig,
+) -> Result<Vec<crate::models::SignificantEvent>, StorageError> {
+    let reader = JsonlReader::new(config.significant_events_path());
+    reader.read_all()
+}
+
+/// Write significant events to the global file, sorted by date.
+pub fn write_significant_events(
+    config: &StorageConfig,
+    events: &mut Vec<crate::models::SignificantEvent>,
+) -> Result<usize, StorageError> {
+    events.sort_by_key(|e| e.date);
+    let writer = JsonlWriter::new(config.significant_events_path());
+    writer.write_all(events)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -322,6 +322,240 @@ impl AiBackend for OllamaBackend {
     }
 }
 
+// --- Anthropic backend ---
+
+#[cfg(feature = "remote-ai")]
+#[derive(Debug, Serialize)]
+struct AnthropicRequest {
+    model: String,
+    max_tokens: u32,
+    messages: Vec<AnthropicMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+}
+
+#[cfg(feature = "remote-ai")]
+#[derive(Debug, Serialize, Deserialize)]
+struct AnthropicMessage {
+    role: String,
+    content: String,
+}
+
+#[cfg(feature = "remote-ai")]
+#[derive(Debug, Deserialize)]
+struct AnthropicResponse {
+    content: Vec<AnthropicContent>,
+    model: String,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
+}
+
+#[cfg(feature = "remote-ai")]
+#[derive(Debug, Deserialize)]
+struct AnthropicContent {
+    text: String,
+}
+
+#[cfg(feature = "remote-ai")]
+#[derive(Debug, Deserialize)]
+struct AnthropicUsage {
+    input_tokens: u32,
+    output_tokens: u32,
+}
+
+/// Anthropic API backend implementation.
+#[cfg(feature = "remote-ai")]
+pub struct AnthropicBackend {
+    client: reqwest::Client,
+    model: String,
+    api_key: String,
+}
+
+#[cfg(feature = "remote-ai")]
+impl AnthropicBackend {
+    pub fn new(api_key: String, model: String, timeout_seconds: u64) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(timeout_seconds))
+            .build()
+            .expect("Failed to build HTTP client");
+
+        Self {
+            client,
+            model,
+            api_key,
+        }
+    }
+
+    pub fn from_env(model: String) -> Result<Self, AgentError> {
+        let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
+            AgentError::BackendUnavailable("ANTHROPIC_API_KEY env var not set".to_string())
+        })?;
+        Ok(Self::new(api_key, model, 120))
+    }
+}
+
+#[cfg(feature = "remote-ai")]
+#[async_trait]
+impl AiBackend for AnthropicBackend {
+    fn name(&self) -> &'static str {
+        "anthropic"
+    }
+
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, AgentError> {
+        let url = "https://api.anthropic.com/v1/messages";
+
+        // Extract system messages into top-level system field
+        let mut system_parts: Vec<String> = Vec::new();
+        let mut messages: Vec<AnthropicMessage> = Vec::new();
+
+        for msg in request.messages {
+            match msg.role {
+                MessageRole::System => {
+                    system_parts.push(msg.content);
+                }
+                MessageRole::User => {
+                    messages.push(AnthropicMessage {
+                        role: "user".to_string(),
+                        content: msg.content,
+                    });
+                }
+                MessageRole::Assistant => {
+                    messages.push(AnthropicMessage {
+                        role: "assistant".to_string(),
+                        content: msg.content,
+                    });
+                }
+            }
+        }
+
+        // For json_mode, append instruction since Anthropic has no native JSON mode flag
+        if request.json_mode {
+            system_parts.push(
+                "IMPORTANT: You must respond with valid JSON only. No other text.".to_string(),
+            );
+        }
+
+        let system = if system_parts.is_empty() {
+            None
+        } else {
+            Some(system_parts.join("\n\n"))
+        };
+
+        let max_tokens = request.max_tokens.unwrap_or(8192);
+
+        let anthropic_request = AnthropicRequest {
+            model: self.model.clone(),
+            max_tokens,
+            messages,
+            system,
+            temperature: request.temperature,
+        };
+
+        debug!("Sending request to Anthropic API");
+
+        // Retry loop for rate limiting (429) with exponential backoff
+        let max_retries = 5;
+        let mut anthropic_response: Option<AnthropicResponse> = None;
+
+        for attempt in 0..=max_retries {
+            let response = self
+                .client
+                .post(url)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("content-type", "application/json")
+                .json(&anthropic_request)
+                .send()
+                .await
+                .map_err(|e| AgentError::BackendUnavailable(e.to_string()))?;
+
+            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                if attempt == max_retries {
+                    let body = response.text().await.unwrap_or_default();
+                    return Err(AgentError::BackendUnavailable(format!(
+                        "Anthropic API rate limit after {} retries: {}",
+                        max_retries, body
+                    )));
+                }
+
+                // Parse retry-after header, default to exponential backoff
+                let wait_secs = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(30 * (1 << attempt)); // 30s, 60s, 120s, 240s...
+
+                warn!(
+                    "Rate limited (attempt {}/{}), waiting {}s before retry",
+                    attempt + 1,
+                    max_retries,
+                    wait_secs
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+                continue;
+            }
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(AgentError::BackendUnavailable(format!(
+                    "Anthropic API returned {}: {}",
+                    status, body
+                )));
+            }
+
+            let body_text = response
+                .text()
+                .await
+                .map_err(|e| AgentError::ResponseParseError(e.to_string()))?;
+
+            match serde_json::from_str::<AnthropicResponse>(&body_text) {
+                Ok(parsed) => {
+                    anthropic_response = Some(parsed);
+                    break;
+                }
+                Err(e) => {
+                    warn!("Failed to parse Anthropic response: {}. Body: {}",
+                        e, &body_text[..body_text.len().min(500)]);
+                    return Err(AgentError::ResponseParseError(format!(
+                        "Invalid JSON from Anthropic: {}", e
+                    )));
+                }
+            }
+        }
+
+        let anthropic_response = anthropic_response
+            .ok_or_else(|| AgentError::BackendUnavailable("No response after retries".to_string()))?;
+
+        let content = anthropic_response
+            .content
+            .into_iter()
+            .map(|c| c.text)
+            .collect::<Vec<_>>()
+            .join("");
+
+        let tokens_used = anthropic_response.usage.map(|u| TokenUsage {
+            prompt_tokens: u.input_tokens,
+            completion_tokens: u.output_tokens,
+            total_tokens: u.input_tokens + u.output_tokens,
+        });
+
+        Ok(ChatResponse {
+            content,
+            model: anthropic_response.model,
+            tokens_used,
+        })
+    }
+
+    async fn health_check(&self) -> Result<bool, AgentError> {
+        // Anthropic has no health endpoint; assume available if key is set
+        Ok(true)
+    }
+}
+
 /// Create an AI backend from configuration.
 pub fn create_backend(config: &AiBackendConfig) -> Box<dyn AiBackend> {
     match config {
@@ -339,8 +573,19 @@ pub fn create_backend(config: &AiBackendConfig) -> Box<dyn AiBackend> {
             unimplemented!("OpenAI backend not yet implemented")
         }
         #[cfg(feature = "remote-ai")]
-        AiBackendConfig::Anthropic { .. } => {
-            unimplemented!("Anthropic backend not yet implemented")
+        AiBackendConfig::Anthropic {
+            api_key_env,
+            model,
+            timeout_seconds,
+        } => {
+            let api_key = std::env::var(api_key_env).unwrap_or_else(|_| {
+                panic!("Environment variable {} not set", api_key_env);
+            });
+            Box::new(AnthropicBackend::new(
+                api_key,
+                model.clone(),
+                *timeout_seconds,
+            ))
         }
     }
 }
@@ -448,6 +693,78 @@ mod tests {
             AiBackendConfig::Ollama { model, .. } => assert_eq!(model, "llama3.2"),
             #[cfg(feature = "remote-ai")]
             _ => panic!("Expected Ollama"),
+        }
+    }
+
+    #[cfg(feature = "remote-ai")]
+    #[test]
+    fn test_anthropic_request_serialization() {
+        let request = AnthropicRequest {
+            model: "claude-sonnet-4-20250514".to_string(),
+            max_tokens: 4096,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            }],
+            system: Some("You are helpful".to_string()),
+            temperature: Some(0.5),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("claude-sonnet-4-20250514"));
+        assert!(json.contains("You are helpful"));
+        assert!(json.contains("4096"));
+    }
+
+    #[cfg(feature = "remote-ai")]
+    #[test]
+    fn test_anthropic_response_deserialization() {
+        let json = r#"{
+            "content": [{"type": "text", "text": "{\"events\": []}"}],
+            "model": "claude-sonnet-4-20250514",
+            "usage": {"input_tokens": 100, "output_tokens": 50}
+        }"#;
+
+        let response: AnthropicResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.content.len(), 1);
+        assert_eq!(response.content[0].text, "{\"events\": []}");
+        assert_eq!(response.model, "claude-sonnet-4-20250514");
+        let usage = response.usage.unwrap();
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 50);
+    }
+
+    #[cfg(feature = "remote-ai")]
+    #[test]
+    fn test_anthropic_response_without_usage() {
+        let json = r#"{
+            "content": [{"type": "text", "text": "hello"}],
+            "model": "claude-sonnet-4-20250514"
+        }"#;
+
+        let response: AnthropicResponse = serde_json::from_str(json).unwrap();
+        assert!(response.usage.is_none());
+    }
+
+    #[cfg(feature = "remote-ai")]
+    #[test]
+    fn test_anthropic_config_serialization() {
+        let config = AiBackendConfig::Anthropic {
+            api_key_env: "ANTHROPIC_API_KEY".to_string(),
+            model: "claude-sonnet-4-20250514".to_string(),
+            timeout_seconds: 120,
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("anthropic"));
+        assert!(json.contains("ANTHROPIC_API_KEY"));
+
+        let parsed: AiBackendConfig = serde_json::from_str(&json).unwrap();
+        match parsed {
+            AiBackendConfig::Anthropic { model, .. } => {
+                assert_eq!(model, "claude-sonnet-4-20250514")
+            }
+            _ => panic!("Expected Anthropic"),
         }
     }
 }

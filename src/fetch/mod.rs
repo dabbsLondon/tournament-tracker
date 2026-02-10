@@ -111,10 +111,7 @@ impl Default for FetcherConfig {
             cache_ttl: Duration::from_secs(3600), // 1 hour
             max_content_size: 50 * 1024 * 1024,   // 50MB
             timeout: Duration::from_secs(30),
-            user_agent: format!(
-                "meta-agent/{} (Warhammer 40k meta tracker)",
-                env!("CARGO_PKG_VERSION")
-            ),
+            user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string(),
             request_delay: Duration::from_millis(500),
         }
     }
@@ -456,6 +453,6 @@ mod tests {
 
         assert_eq!(config.cache_dir, PathBuf::from("./data/raw"));
         assert_eq!(config.cache_ttl, Duration::from_secs(3600));
-        assert!(config.user_agent.contains("meta-agent"));
+        assert!(config.user_agent.contains("Mozilla"));
     }
 }

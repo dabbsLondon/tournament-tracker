@@ -96,7 +96,8 @@ impl ListNormalizerAgent {
         response: &str,
         raw_text: &str,
     ) -> Result<AgentOutput<NormalizedArmyList>, AgentError> {
-        let parsed: ListNormalizerResponse = serde_json::from_str(response)
+        let json_str = super::extract_json(response);
+        let parsed: ListNormalizerResponse = serde_json::from_str(json_str)
             .map_err(|e| AgentError::ResponseParseError(format!("Invalid JSON: {}", e)))?;
 
         let extracted = parsed.list;
@@ -147,9 +148,27 @@ Given raw list text, extract:
   - model_count: Number of models (default 1)
   - points: Points cost
   - wargear: Array of selected wargear/upgrades
-  - keywords: Array of relevant keywords
+  - keywords: Array of keywords — MUST include the unit's battlefield role
 - confidence: "high", "medium", or "low"
 - notes: Array of any issues or uncertainties
+
+UNIT KEYWORDS — Every unit MUST have at least one role keyword from this list:
+  "Character"          — HQ / leader models (Captains, Farseers, Warbosses, etc.)
+  "Epic Hero"          — Named unique characters (Calgar, Ghazghkull, etc.). Also add "Character".
+  "Battleline"         — Core troops (Intercessors, Guardians, Warriors, etc.)
+  "Dedicated Transport"— Transport vehicles (Rhinos, Wave Serpents, Trukks, etc.)
+  "Vehicle"            — Tanks, walkers, artillery (Leman Russ, War Walker, etc.)
+  "Monster"            — Large creatures (Carnifex, Avatar of Khaine, Wraithlord, etc.)
+  "Infantry"           — Foot soldiers that aren't Battleline (Terminators, Aspect Warriors, etc.)
+  "Mounted"            — Cavalry / bike units (Windriders, Thunderwolf Cavalry, etc.)
+  "Fortification"      — Terrain / buildings (Aegis Defence Line, etc.)
+
+Additional keywords to include when applicable:
+  "Warlord"            — The army's warlord
+  "Psyker"             — Units with psychic abilities
+  "Fly"                — Units that can fly
+  "Swarm"              — Swarm units
+  "Beast"              — Beast units
 
 Handle various list formats:
 - Battlescribe exports
@@ -171,7 +190,21 @@ Return JSON in this exact format:
         "model_count": 1,
         "points": 335,
         "wargear": ["Wailing Doom"],
-        "keywords": ["Epic Hero", "Monster"]
+        "keywords": ["Epic Hero", "Character", "Monster"]
+      },
+      {
+        "name": "Guardians",
+        "model_count": 10,
+        "points": 110,
+        "wargear": ["Shuriken Catapults", "Heavy Weapon Platform"],
+        "keywords": ["Battleline", "Infantry"]
+      },
+      {
+        "name": "Wave Serpent",
+        "model_count": 1,
+        "points": 120,
+        "wargear": ["Twin Shuriken Cannon"],
+        "keywords": ["Dedicated Transport", "Vehicle", "Fly"]
       }
     ],
     "confidence": "high",
@@ -185,6 +218,7 @@ IMPORTANT:
 - Do NOT add units not mentioned in the source text
 - Include all wargear/upgrades mentioned
 - Sum points if total not explicitly stated
+- Every unit MUST have at least one role keyword (Character/Battleline/Vehicle/etc.)
 - Note any parsing issues in the notes array"#;
 
 #[async_trait]

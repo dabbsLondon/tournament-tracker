@@ -9,7 +9,9 @@
 pub mod jsonl;
 pub mod parquet;
 
-pub use jsonl::{EntityType, JsonlReader, JsonlWriter};
+pub use jsonl::{
+    read_significant_events, write_significant_events, EntityType, JsonlReader, JsonlWriter,
+};
 pub use parquet::{ParquetReader, ParquetWriter, TableType};
 
 use std::path::PathBuf;
@@ -68,6 +70,13 @@ impl StorageConfig {
 
     pub fn review_queue_dir(&self) -> PathBuf {
         self.data_dir.join("review_queue")
+    }
+
+    /// Path to the global significant_events file (not per-epoch).
+    pub fn significant_events_path(&self) -> PathBuf {
+        self.data_dir
+            .join("normalized")
+            .join("significant_events.jsonl")
     }
 }
 
