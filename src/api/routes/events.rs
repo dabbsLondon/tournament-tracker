@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -6,6 +9,154 @@ use crate::api::state::AppState;
 use crate::api::{dedup_by_id, resolve_epoch, ApiError, Pagination, PaginationMeta};
 use crate::models::{ArmyList, Event, Placement};
 use crate::storage::{EntityType, JsonlReader};
+
+// ── Faction Taxonomy ─────────────────────────────────────────────
+
+/// Information about a canonical faction.
+#[derive(Debug, Clone)]
+pub struct FactionInfo {
+    pub canonical_name: &'static str,
+    pub allegiance: &'static str,
+    pub allegiance_sub: &'static str,
+}
+
+/// Result of resolving a raw faction string.
+#[derive(Debug, Clone)]
+pub struct ResolvedFaction {
+    pub faction: String,
+    pub subfaction: Option<String>,
+    pub allegiance: String,
+    pub allegiance_sub: String,
+}
+
+static FACTION_MAP: LazyLock<HashMap<&'static str, FactionInfo>> = LazyLock::new(|| {
+    let entries: Vec<(&str, FactionInfo)> = vec![
+        // Space Marines chapters (distinct factions with codex supplements)
+        ("space marines", FactionInfo { canonical_name: "Space Marines", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("blood angels", FactionInfo { canonical_name: "Blood Angels", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("dark angels", FactionInfo { canonical_name: "Dark Angels", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("space wolves", FactionInfo { canonical_name: "Space Wolves", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("black templars", FactionInfo { canonical_name: "Black Templars", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("deathwatch", FactionInfo { canonical_name: "Deathwatch", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("grey knights", FactionInfo { canonical_name: "Grey Knights", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        // Other chapters → each is its own faction
+        ("adeptus astartes", FactionInfo { canonical_name: "Space Marines", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("ultramarines", FactionInfo { canonical_name: "Ultramarines", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("iron hands", FactionInfo { canonical_name: "Iron Hands", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("raven guard", FactionInfo { canonical_name: "Raven Guard", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("salamanders", FactionInfo { canonical_name: "Salamanders", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("imperial fists", FactionInfo { canonical_name: "Imperial Fists", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("white scars", FactionInfo { canonical_name: "White Scars", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("crimson fists", FactionInfo { canonical_name: "Crimson Fists", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("black dragons", FactionInfo { canonical_name: "Black Dragons", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        ("flesh tearers", FactionInfo { canonical_name: "Flesh Tearers", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        // Armies of the Imperium
+        ("adepta sororitas", FactionInfo { canonical_name: "Adepta Sororitas", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
+        ("sisters of battle", FactionInfo { canonical_name: "Adepta Sororitas", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
+        ("adeptus custodes", FactionInfo { canonical_name: "Adeptus Custodes", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
+        ("adeptus mechanicus", FactionInfo { canonical_name: "Adeptus Mechanicus", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
+        ("astra militarum", FactionInfo { canonical_name: "Astra Militarum", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
+        ("imperial guard", FactionInfo { canonical_name: "Astra Militarum", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
+        ("imperial knights", FactionInfo { canonical_name: "Imperial Knights", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
+        ("agents of the imperium", FactionInfo { canonical_name: "Agents of the Imperium", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
+        // Forces of Chaos
+        ("chaos space marines", FactionInfo { canonical_name: "Chaos Space Marines", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        ("death guard", FactionInfo { canonical_name: "Death Guard", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        ("thousand sons", FactionInfo { canonical_name: "Thousand Sons", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        ("chaos thousand sons", FactionInfo { canonical_name: "Thousand Sons", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        ("world eaters", FactionInfo { canonical_name: "World Eaters", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        ("emperor's children", FactionInfo { canonical_name: "Emperor's Children", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        ("chaos daemons", FactionInfo { canonical_name: "Chaos Daemons", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        ("daemons of chaos", FactionInfo { canonical_name: "Chaos Daemons", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        ("chaos knights", FactionInfo { canonical_name: "Chaos Knights", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        // Xenos
+        ("aeldari", FactionInfo { canonical_name: "Aeldari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("craftworlds", FactionInfo { canonical_name: "Aeldari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("craftworld", FactionInfo { canonical_name: "Aeldari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("harlequins", FactionInfo { canonical_name: "Aeldari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("drukhari", FactionInfo { canonical_name: "Drukhari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("dark eldar", FactionInfo { canonical_name: "Drukhari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("tyranids", FactionInfo { canonical_name: "Tyranids", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("genestealer cults", FactionInfo { canonical_name: "Genestealer Cults", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("genestealer cult", FactionInfo { canonical_name: "Genestealer Cults", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("leagues of votann", FactionInfo { canonical_name: "Leagues of Votann", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("votann", FactionInfo { canonical_name: "Leagues of Votann", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("necrons", FactionInfo { canonical_name: "Necrons", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("orks", FactionInfo { canonical_name: "Orks", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("t'au empire", FactionInfo { canonical_name: "T'au Empire", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("t'au", FactionInfo { canonical_name: "T'au Empire", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("tau", FactionInfo { canonical_name: "T'au Empire", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        ("tau empire", FactionInfo { canonical_name: "T'au Empire", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+    ];
+    entries.into_iter().collect()
+});
+
+/// Chapters that should be promoted from subfaction to faction.
+/// When faction is "Space Marines" and subfaction matches one of these,
+/// the subfaction becomes the faction.
+const CHAPTER_FACTIONS: &[&str] = &[
+    "Blood Angels", "Dark Angels", "Space Wolves",
+    "Black Templars", "Deathwatch", "Grey Knights",
+    "Ultramarines", "Iron Hands", "Raven Guard", "Salamanders",
+    "Imperial Fists", "White Scars", "Crimson Fists", "Black Dragons",
+    "Flesh Tearers",
+];
+
+/// Look up faction info from the taxonomy map.
+pub fn lookup_faction(name: &str) -> Option<&'static FactionInfo> {
+    FACTION_MAP.get(name.trim().to_lowercase().as_str())
+}
+
+/// Get the allegiance for a faction name. Returns None if not found.
+pub fn faction_allegiance(name: &str) -> Option<&'static str> {
+    lookup_faction(name).map(|info| info.allegiance)
+}
+
+/// Resolve a raw faction + subfaction into canonical faction, subfaction, and allegiance.
+///
+/// Handles cases like:
+/// - `faction: "Space Marines", subfaction: "Blood Angels"` → `faction: "Blood Angels", subfaction: None`
+/// - `faction: "Ultramarines"` → `faction: "Space Marines", subfaction: "Ultramarines"`
+/// - `faction: "Adeptus Astartes"` → `faction: "Space Marines"`
+/// - `faction: "Blood Angels"` → `faction: "Blood Angels"`
+pub fn resolve_faction(faction: &str, subfaction: Option<&str>) -> ResolvedFaction {
+    let trimmed = faction.trim();
+    let lower = trimmed.to_lowercase();
+
+    // Step 1: If subfaction is a chapter-level faction, promote it
+    if let Some(sub) = subfaction {
+        let sub_lower = sub.trim().to_lowercase();
+        // Check if subfaction is a codex-supplement chapter
+        if CHAPTER_FACTIONS.iter().any(|c| c.to_lowercase() == sub_lower) {
+            if let Some(info) = FACTION_MAP.get(sub_lower.as_str()) {
+                return ResolvedFaction {
+                    faction: info.canonical_name.to_string(),
+                    subfaction: None,
+                    allegiance: info.allegiance.to_string(),
+                    allegiance_sub: info.allegiance_sub.to_string(),
+                };
+            }
+        }
+    }
+
+    // Step 2: Look up the faction itself
+    if let Some(info) = FACTION_MAP.get(lower.as_str()) {
+        return ResolvedFaction {
+            faction: info.canonical_name.to_string(),
+            subfaction: subfaction.map(|s| s.to_string()),
+            allegiance: info.allegiance.to_string(),
+            allegiance_sub: info.allegiance_sub.to_string(),
+        };
+    }
+
+    // Step 3: Unknown faction — return as-is with no allegiance
+    ResolvedFaction {
+        faction: trimmed.to_string(),
+        subfaction: subfaction.map(|s| s.to_string()),
+        allegiance: "Unknown".to_string(),
+        allegiance_sub: "Unknown".to_string(),
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct ListEventsParams {
@@ -236,23 +387,13 @@ pub fn unit_to_detail(u: &crate::models::Unit) -> UnitDetail {
 
 /// Normalize faction names to canonical forms.
 /// Handles common variants and abbreviations found in tournament data.
+/// Uses the FACTION_MAP taxonomy for consistent resolution.
 pub fn normalize_faction_name(name: &str) -> String {
     let trimmed = name.trim();
-    let lower = trimmed.to_lowercase();
-    match lower.as_str() {
-        "genestealer cult" => "Genestealer Cults".to_string(),
-        "genestealer cults" => "Genestealer Cults".to_string(),
-        "adeptus astartes" => "Space Marines".to_string(),
-        "astra militarum" | "imperial guard" => "Astra Militarum".to_string(),
-        "t'au" | "tau" | "tau empire" => "T'au Empire".to_string(),
-        "craftworlds" | "craftworld" => "Aeldari".to_string(),
-        "harlequins" => "Aeldari".to_string(),
-        "black templars" => "Black Templars".to_string(),
-        "blood angels" => "Blood Angels".to_string(),
-        "dark angels" => "Dark Angels".to_string(),
-        "space wolves" => "Space Wolves".to_string(),
-        "deathwatch" => "Deathwatch".to_string(),
-        _ => trimmed.to_string(),
+    if let Some(info) = lookup_faction(trimmed) {
+        info.canonical_name.to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -353,10 +494,9 @@ fn match_lists_to_placements(
                 .is_some_and(|name| player_names_match(&placement.player_name, name))
         });
 
-        // Fallback: faction + detachment match for legacy lists without player_name
+        // Fallback: faction + detachment match for lists without player_name
         let matched = matched.or_else(|| {
-            let mut best_idx: Option<usize> = None;
-            let mut best_score: u32 = 0;
+            let mut scored: Vec<(usize, u32)> = Vec::new();
 
             for (i, (_, detail)) in candidates.iter().enumerate() {
                 let mut score: u32 = 0;
@@ -371,20 +511,28 @@ fn match_lists_to_placements(
                         score += 5;
                     }
                 }
-                if score > best_score {
-                    best_score = score;
-                    best_idx = Some(i);
+                if score > 0 {
+                    scored.push((i, score));
                 }
             }
 
-            // Require faction + detachment match (8 = faction 3 + detachment 5)
-            // A bare faction match alone is too loose — it would match any list
-            // of the same faction regardless of detachment/player
-            if best_score >= 8 {
-                best_idx
-            } else {
-                None
+            scored.sort_by(|a, b| b.1.cmp(&a.1));
+
+            // If faction+detachment match (score 8+), always accept
+            if let Some(&(idx, score)) = scored.first() {
+                if score >= 8 {
+                    return Some(idx);
+                }
             }
+
+            // If there's exactly one faction match (score 3+), accept it —
+            // this handles cases where player name is missing but faction is clear
+            let faction_matches: Vec<_> = scored.iter().filter(|&&(_, s)| s >= 3).collect();
+            if faction_matches.len() == 1 {
+                return Some(faction_matches[0].0);
+            }
+
+            None
         });
 
         if let Some(idx) = matched {
@@ -479,6 +627,51 @@ mod tests {
         assert_eq!(normalize_faction_name("T'au Empire"), "T'au Empire");
         assert_eq!(normalize_faction_name("tau empire"), "T'au Empire");
         assert_eq!(normalize_faction_name("Blood Angels"), "Blood Angels");
+    }
+
+    #[test]
+    fn test_faction_allegiance() {
+        assert_eq!(faction_allegiance("Space Marines"), Some("Imperium"));
+        assert_eq!(faction_allegiance("Blood Angels"), Some("Imperium"));
+        assert_eq!(faction_allegiance("Chaos Space Marines"), Some("Chaos"));
+        assert_eq!(faction_allegiance("Death Guard"), Some("Chaos"));
+        assert_eq!(faction_allegiance("Aeldari"), Some("Xenos"));
+        assert_eq!(faction_allegiance("Necrons"), Some("Xenos"));
+        assert_eq!(faction_allegiance("Unknown Faction"), None);
+    }
+
+    #[test]
+    fn test_resolve_faction_chapter_promotion() {
+        // subfaction "Blood Angels" should be promoted to faction
+        let resolved = resolve_faction("Space Marines", Some("Blood Angels"));
+        assert_eq!(resolved.faction, "Blood Angels");
+        assert!(resolved.subfaction.is_none());
+        assert_eq!(resolved.allegiance, "Imperium");
+    }
+
+    #[test]
+    fn test_resolve_faction_generic_chapter() {
+        // "Ultramarines" should be its own faction
+        let resolved = resolve_faction("Ultramarines", None);
+        assert_eq!(resolved.faction, "Ultramarines");
+        assert_eq!(resolved.subfaction, None);
+        assert_eq!(resolved.allegiance, "Imperium");
+    }
+
+    #[test]
+    fn test_resolve_faction_already_correct() {
+        let resolved = resolve_faction("Blood Angels", None);
+        assert_eq!(resolved.faction, "Blood Angels");
+        assert!(resolved.subfaction.is_none());
+        assert_eq!(resolved.allegiance, "Imperium");
+        assert_eq!(resolved.allegiance_sub, "Space Marines");
+    }
+
+    #[test]
+    fn test_resolve_faction_old_name() {
+        let resolved = resolve_faction("Adeptus Astartes", None);
+        assert_eq!(resolved.faction, "Space Marines");
+        assert_eq!(resolved.allegiance, "Imperium");
     }
 
     #[test]

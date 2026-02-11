@@ -68,6 +68,10 @@ pub struct ArmyList {
     /// Subfaction
     pub subfaction: Option<String>,
 
+    /// Allegiance group (e.g., "Imperium", "Chaos", "Xenos")
+    #[serde(default)]
+    pub allegiance: Option<String>,
+
     /// Detachment name
     pub detachment: Option<String>,
 
@@ -121,6 +125,7 @@ impl ArmyList {
             id,
             faction,
             subfaction: None,
+            allegiance: None,
             detachment: None,
             total_points,
             units,
@@ -156,6 +161,12 @@ impl ArmyList {
     /// Builder method to set subfaction.
     pub fn with_subfaction(mut self, subfaction: String) -> Self {
         self.subfaction = Some(subfaction);
+        self
+    }
+
+    /// Builder method to set allegiance.
+    pub fn with_allegiance(mut self, allegiance: String) -> Self {
+        self.allegiance = Some(allegiance);
         self
     }
 

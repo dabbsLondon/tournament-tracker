@@ -30,6 +30,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/events/:id", get(routes::events::get_event))
         .route("/api/meta/factions", get(routes::meta::faction_stats))
         .route("/api/meta/factions/:name", get(routes::meta::faction_detail))
+        .route("/api/meta/allegiances", get(routes::meta::allegiance_stats))
         .route("/api/epochs", get(routes::epochs::list_epochs));
 
     Router::new()

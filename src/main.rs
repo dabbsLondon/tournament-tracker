@@ -157,6 +157,10 @@ enum Commands {
         /// Epoch to normalize (default: current epoch)
         #[arg(long)]
         epoch: Option<String>,
+
+        /// Only process lists matching this faction (e.g. "Space Marines")
+        #[arg(long)]
+        faction: Option<String>,
     },
 
     /// Register a balance pass / significant event
@@ -202,6 +206,21 @@ enum Commands {
         /// How many days back to look for new articles (default 7)
         #[arg(long, default_value = "7")]
         days: u32,
+    },
+
+    /// Reclassify factions using the canonical taxonomy
+    ReclassifyFactions {
+        /// Epoch to reclassify (default: current). Use --all to reclassify every epoch.
+        #[arg(long, default_value = "current")]
+        epoch: String,
+
+        /// Reclassify all epochs found in the normalized directory
+        #[arg(long)]
+        all: bool,
+
+        /// Show what would change without writing
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Repartition data by epoch
@@ -463,6 +482,7 @@ async fn main() -> Result<()> {
             dry_run,
             limit,
             epoch,
+            faction,
         } => {
             let storage = StorageConfig::new(std::path::PathBuf::from(&cli.data_dir));
 
@@ -506,11 +526,22 @@ async fn main() -> Result<()> {
             let backend: Arc<dyn AiBackend> = select_backend();
             let agent = ListNormalizerAgent::new(backend);
 
+            // Normalize the faction filter for comparison
+            let faction_filter = faction.as_deref().map(|f| {
+                meta_agent::api::routes::events::normalize_faction_name(f)
+            });
+
             // Determine which lists to process
             let indices: Vec<usize> = lists
                 .iter()
                 .enumerate()
                 .filter(|(_, l)| !only_empty || l.units.is_empty())
+                .filter(|(_, l)| {
+                    match &faction_filter {
+                        Some(ff) => meta_agent::api::routes::events::normalize_faction_name(&l.faction).eq_ignore_ascii_case(ff),
+                        None => true,
+                    }
+                })
                 .map(|(i, _)| i)
                 .take(limit.unwrap_or(usize::MAX))
                 .collect();
@@ -1097,6 +1128,176 @@ async fn main() -> Result<()> {
             }
 
             println!("\n=== Weekly update complete ===");
+        }
+        Commands::ReclassifyFactions { epoch, all, dry_run } => {
+            use meta_agent::api::routes::events::resolve_faction;
+
+            let storage = StorageConfig::new(std::path::PathBuf::from(&cli.data_dir));
+
+            // Build list of epoch IDs to process
+            let epoch_ids: Vec<String> = if all {
+                // Find all epoch directories in normalized/
+                let norm_dir = storage.normalized_dir();
+                let mut ids = Vec::new();
+                if let Ok(entries) = std::fs::read_dir(&norm_dir) {
+                    for entry in entries.flatten() {
+                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                            if let Some(name) = entry.file_name().to_str() {
+                                ids.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+                ids.sort();
+                ids
+            } else if epoch == "current" {
+                let sig = read_significant_events(&storage).unwrap_or_default();
+                let resolved = if sig.is_empty() {
+                    "current".to_string()
+                } else {
+                    let mapper = EpochMapper::from_significant_events(&sig);
+                    mapper.current_epoch()
+                        .map(|e| e.id.as_str().to_string())
+                        .unwrap_or_else(|| "current".to_string())
+                };
+                // Include both the resolved epoch and literal "current" if they differ
+                let norm_dir = storage.normalized_dir();
+                let mut ids = vec![resolved.clone()];
+                if resolved != "current" && norm_dir.join("current").is_dir() {
+                    ids.push("current".to_string());
+                }
+                ids
+            } else {
+                vec![epoch]
+            };
+
+            let mut grand_p_total = 0u32;
+            let mut grand_p_changed = 0u32;
+            let mut grand_l_total = 0u32;
+            let mut grand_l_changed = 0u32;
+
+            for epoch_id in &epoch_ids {
+                println!("=== Reclassify Factions (epoch: {}) ===\n", epoch_id);
+
+                // ── Process placements ──
+                let placement_reader =
+                    JsonlReader::<meta_agent::models::Placement>::for_entity(&storage, meta_agent::storage::EntityType::Placement, epoch_id);
+                let placements = match placement_reader.read_all() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!("Skipping placements for epoch {}: {}", epoch_id, e);
+                        Vec::new()
+                    }
+                };
+                let mut placements = dedup_by_id(placements, |p| p.id.as_str());
+
+                let placement_path = storage.normalized_dir().join(epoch_id).join("placements.jsonl");
+                if placement_path.exists() && !dry_run && !placements.is_empty() {
+                    let bak = placement_path.with_extension("jsonl.pre-reclassify.bak");
+                    std::fs::copy(&placement_path, &bak).expect("Failed to backup placements");
+                }
+
+                let mut p_changed = 0u32;
+                let p_total = placements.len() as u32;
+                for p in &mut placements {
+                    let resolved = resolve_faction(&p.faction, p.subfaction.as_deref());
+                    let mut changed = false;
+                    if p.faction != resolved.faction {
+                        if dry_run {
+                            println!("  [placement] #{} {} — faction: \"{}\" → \"{}\"",
+                                p.rank, p.player_name, p.faction, resolved.faction);
+                        }
+                        p.faction = resolved.faction.clone();
+                        changed = true;
+                    }
+                    if p.subfaction != resolved.subfaction {
+                        if dry_run && (p.subfaction.is_some() || resolved.subfaction.is_some()) {
+                            println!("  [placement] #{} {} — subfaction: {:?} → {:?}",
+                                p.rank, p.player_name, p.subfaction, resolved.subfaction);
+                        }
+                        p.subfaction = resolved.subfaction.clone();
+                        changed = true;
+                    }
+                    if p.allegiance.as_deref() != Some(&resolved.allegiance) {
+                        p.allegiance = Some(resolved.allegiance.clone());
+                        changed = true;
+                    }
+                    if changed {
+                        p_changed += 1;
+                    }
+                }
+
+                if !dry_run && !placements.is_empty() {
+                    let writer = meta_agent::storage::JsonlWriter::<meta_agent::models::Placement>::for_entity(
+                        &storage, meta_agent::storage::EntityType::Placement, epoch_id);
+                    writer.write_all(&placements).expect("Failed to write placements");
+                }
+
+                // ── Process army lists ──
+                let list_reader =
+                    JsonlReader::<ArmyList>::for_entity(&storage, meta_agent::storage::EntityType::ArmyList, epoch_id);
+                let lists = match list_reader.read_all() {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::warn!("Skipping army lists for epoch {}: {}", epoch_id, e);
+                        Vec::new()
+                    }
+                };
+                let mut lists = dedup_by_id(lists, |l| l.id.as_str());
+
+                let list_path = storage.normalized_dir().join(epoch_id).join("army_lists.jsonl");
+                if list_path.exists() && !dry_run && !lists.is_empty() {
+                    let bak = list_path.with_extension("jsonl.pre-reclassify.bak");
+                    std::fs::copy(&list_path, &bak).expect("Failed to backup army lists");
+                }
+
+                let mut l_changed = 0u32;
+                let l_total = lists.len() as u32;
+                for l in &mut lists {
+                    let resolved = resolve_faction(&l.faction, l.subfaction.as_deref());
+                    let mut changed = false;
+                    if l.faction != resolved.faction {
+                        if dry_run {
+                            println!("  [list] {} — faction: \"{}\" → \"{}\"",
+                                l.player_name.as_deref().unwrap_or("?"), l.faction, resolved.faction);
+                        }
+                        l.faction = resolved.faction.clone();
+                        changed = true;
+                    }
+                    if l.subfaction != resolved.subfaction {
+                        l.subfaction = resolved.subfaction.clone();
+                        changed = true;
+                    }
+                    if l.allegiance.as_deref() != Some(&resolved.allegiance) {
+                        l.allegiance = Some(resolved.allegiance.clone());
+                        changed = true;
+                    }
+                    if changed {
+                        l_changed += 1;
+                    }
+                }
+
+                if !dry_run && !lists.is_empty() {
+                    let writer = meta_agent::storage::JsonlWriter::<ArmyList>::for_entity(
+                        &storage, meta_agent::storage::EntityType::ArmyList, epoch_id);
+                    writer.write_all(&lists).expect("Failed to write army lists");
+                }
+
+                println!("  Placements: {} total, {} changed", p_total, p_changed);
+                println!("  Army lists: {} total, {} changed\n", l_total, l_changed);
+
+                grand_p_total += p_total;
+                grand_p_changed += p_changed;
+                grand_l_total += l_total;
+                grand_l_changed += l_changed;
+            }
+
+            println!("=== Reclassify Results ({} epochs) ===", epoch_ids.len());
+            println!("Placements: {} total, {} changed", grand_p_total, grand_p_changed);
+            println!("Army lists: {} total, {} changed", grand_l_total, grand_l_changed);
+            if dry_run {
+                println!("\n(dry run — no data written to disk)");
+            }
         }
         Commands::Repartition {
             dry_run,

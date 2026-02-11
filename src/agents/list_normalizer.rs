@@ -30,6 +30,7 @@ pub struct ListNormalizerInput {
 pub struct NormalizedArmyList {
     pub faction: String,
     pub subfaction: Option<String>,
+    pub allegiance: Option<String>,
     pub detachment: Option<String>,
     pub total_points: u32,
     pub units: Vec<Unit>,
@@ -58,6 +59,8 @@ struct ExtractedUnit {
 struct ExtractedList {
     faction: String,
     subfaction: Option<String>,
+    #[serde(default)]
+    allegiance: Option<String>,
     detachment: Option<String>,
     total_points: Option<u32>,
     units: Vec<ExtractedUnit>,
@@ -120,6 +123,7 @@ impl ListNormalizerAgent {
         let army_list = NormalizedArmyList {
             faction: extracted.faction,
             subfaction: extracted.subfaction,
+            allegiance: extracted.allegiance,
             detachment: extracted.detachment,
             total_points,
             units,
@@ -139,8 +143,9 @@ impl ListNormalizerAgent {
 const LIST_NORMALIZER_SYSTEM_PROMPT: &str = r#"You are normalizing a Warhammer 40,000 army list into a structured format.
 
 Given raw list text, extract:
-- faction: Main faction (canonical GW name)
+- faction: Main faction — MUST be one of the canonical faction names listed below
 - subfaction: Subfaction if applicable (Chapter, Craftworld, etc.)
+- allegiance: Allegiance group — "Imperium", "Chaos", or "Xenos"
 - detachment: Detachment name
 - total_points: Total army points
 - units: Array of units with:
@@ -151,6 +156,87 @@ Given raw list text, extract:
   - keywords: Array of keywords — MUST include the unit's battlefield role
 - confidence: "high", "medium", or "low"
 - notes: Array of any issues or uncertainties
+
+CANONICAL FACTION NAMES (use EXACTLY one of these for the "faction" field):
+  Space Marines (Imperium)        Blood Angels (Imperium)
+  Dark Angels (Imperium)          Space Wolves (Imperium)
+  Black Templars (Imperium)       Deathwatch (Imperium)
+  Grey Knights (Imperium)         Adepta Sororitas (Imperium)
+  Adeptus Custodes (Imperium)     Adeptus Mechanicus (Imperium)
+  Astra Militarum (Imperium)      Imperial Knights (Imperium)
+  Agents of the Imperium (Imperium)
+  Chaos Space Marines (Chaos)     Death Guard (Chaos)
+  Thousand Sons (Chaos)           World Eaters (Chaos)
+  Emperor's Children (Chaos)      Chaos Daemons (Chaos)
+  Chaos Knights (Chaos)
+  Aeldari (Xenos)                 Drukhari (Xenos)
+  Tyranids (Xenos)                Genestealer Cults (Xenos)
+  Leagues of Votann (Xenos)       Necrons (Xenos)
+  Orks (Xenos)                    T'au Empire (Xenos)
+
+SPACE MARINE CHAPTER IDENTIFICATION:
+You MUST identify the specific Space Marine chapter from the list contents.
+Use the chapter name as the "faction" field. If you cannot determine the chapter,
+use "Space Marines" as faction and leave subfaction null.
+
+Identify chapters by these signature units, detachments, and keywords:
+
+  Blood Angels → faction: "Blood Angels"
+    Units: Sanguinary Guard, Death Company Marines, Death Company with Jump Packs,
+    Death Company Intercessors, Lemartes, Astorath, Dante, The Sanguinor, Mephiston,
+    Baal Predator, Sanguinary Priest, Furioso Dreadnought
+    Detachments: Sons of Sanguinius, Blade of Sanguinius
+
+  Dark Angels → faction: "Dark Angels"
+    Units: Deathwing Knights, Deathwing Terminators, Deathwing Command Squad,
+    Ravenwing Black Knights, Ravenwing Dark Talon, Lazarus, Azrael, Sammael,
+    Belial, Lion El'Jonson, Inner Circle Companions
+    Detachments: Inner Circle Task Force, Unforgiven Task Force
+
+  Space Wolves → faction: "Space Wolves"
+    Units: Thunderwolf Cavalry, Blood Claws, Wulfen, Fenrisian Wolves,
+    Wolf Guard, Wolf Guard Terminators, Hounds of Morkai, Ragnar Blackmane,
+    Bjorn the Fell-Handed, Canis Wolfborn, Logan Grimnar, Long Fangs
+    Detachments: Champions of Russ, Stormlance Task Force
+
+  Black Templars → faction: "Black Templars"
+    Units: Sword Brethren, Primaris Crusader Squad, Castellan, Marshal,
+    Emperor's Champion, High Marshal Helbrecht, Grimaldus
+    Detachments: Righteous Crusaders
+
+  Deathwatch → faction: "Deathwatch"
+    Units: Deathwatch Veterans, Kill Team, Watch Master, Watch Captain,
+    Corvus Blackstar, Deathwatch Terminator Squad, Beacon Angelis
+    Detachments: Black Spear Task Force
+
+  Grey Knights → faction: "Grey Knights"
+    Units: Grey Knight Strike Squad, Grey Knight Terminator Squad, Paladin Squad,
+    Nemesis Dreadknight, Grand Master in Nemesis Dreadknight, Kaldor Draigo,
+    Brother-Captain, Brotherhood Librarian, Purifier Squad, Interceptor Squad
+    Detachments: Teleport Strike Force
+
+  Ultramarines → faction: "Space Marines", subfaction: "Ultramarines"
+    Units: Marneus Calgar, Roboute Guilliman, Victrix Honour Guard, Tyrannic War Veterans,
+    Chief Librarian Tigurius, Captain Sicarius
+    Detachments: Blade of Ultramar, Gladius Task Force
+
+  Iron Hands → faction: "Space Marines", subfaction: "Iron Hands"
+    Units: Iron Father Feirros, Techmarine
+
+  Salamanders → faction: "Space Marines", subfaction: "Salamanders"
+    Units: Adrax Agatone, Vulkan He'stan
+
+  Raven Guard → faction: "Space Marines", subfaction: "Raven Guard"
+    Units: Kayvaan Shrike
+
+  White Scars → faction: "Space Marines", subfaction: "White Scars"
+    Units: Kor'sarro Khan
+
+  Imperial Fists → faction: "Space Marines", subfaction: "Imperial Fists"
+    Units: Tor Garadon
+
+  Also check the list header, FACTION KEYWORD line, or detachment name for chapter clues.
+  Battlescribe lists often show "Faction: Imperium - Blood Angels" or similar.
 
 UNIT KEYWORDS — Every unit MUST have at least one role keyword from this list:
   "Character"          — HQ / leader models (Captains, Farseers, Warbosses, etc.)
@@ -182,6 +268,7 @@ Return JSON in this exact format:
   "list": {
     "faction": "Aeldari",
     "subfaction": "Craftworld Ulthwe",
+    "allegiance": "Xenos",
     "detachment": "Battle Host",
     "total_points": 2000,
     "units": [

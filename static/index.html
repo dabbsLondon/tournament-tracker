@@ -55,16 +55,18 @@ const Api = {
         if (!res.ok) throw new Error('Epochs API error: ' + res.status);
         return res.json();
     },
-    async getEpochs() {
-        const res = await fetch('/api/epochs');
-        if (!res.ok) throw new Error('Epochs API error: ' + res.status);
+    async getAllegiances(epoch) {
+        var params = '';
+        if (epoch && epoch !== 'current') params = '?epoch=' + encodeURIComponent(epoch);
+        const res = await fetch('/api/meta/allegiances' + params);
+        if (!res.ok) throw new Error('Allegiances API error: ' + res.status);
         return res.json();
     }
 };
 
 // ── Tier Helpers ────────────────────────────────────────────────
 
-var TIER_COLORS = ['#ff4444', '#ff8844', '#d4af37', '#7088a8', '#555577'];
+var TIER_COLORS = ['#e05555', '#e0884a', '#c9a84c', '#6a8da6', '#5a5c78'];
 var TIER_LABELS = ['S', 'A', 'B', 'C', 'D'];
 var TIER_CUTS = [0.15, 0.40, 0.70, 0.90]; // percentile boundaries
 
@@ -156,10 +158,10 @@ function MetaChart(props) {
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        backgroundColor: '#1a1a2e',
-                        titleColor: '#d4af37',
-                        bodyColor: '#e0e0e0',
-                        borderColor: '#2a2a4a',
+                        backgroundColor: '#1c1d2b',
+                        titleColor: '#c9a84c',
+                        bodyColor: '#c8cad0',
+                        borderColor: '#2e3048',
                         borderWidth: 1,
                         callbacks: {
                             afterLabel: function(context) {
@@ -172,13 +174,13 @@ function MetaChart(props) {
                 },
                 scales: {
                     x: {
-                        grid: { color: '#2a2a4a' },
-                        ticks: { color: '#888', font: { size: 11 } },
-                        title: { display: true, text: label, color: '#888', font: { size: 11 } }
+                        grid: { color: '#2e3048' },
+                        ticks: { color: '#7a7d8a', font: { size: 11 } },
+                        title: { display: true, text: label, color: '#7a7d8a', font: { size: 11 } }
                     },
                     y: {
                         grid: { display: false },
-                        ticks: { color: '#e0e0e0', font: { size: 12 } }
+                        ticks: { color: '#c8cad0', font: { size: 12 } }
                     }
                 }
             }
@@ -205,11 +207,11 @@ function TierLegend(props) {
     return (
         <div className="tier-legend">
             <div className="tier-legend-row">
-                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#ff4444'}}></span>S</span>
-                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#ff8844'}}></span>A</span>
-                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#d4af37'}}></span>B</span>
-                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#7088a8'}}></span>C</span>
-                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#555577'}}></span>D</span>
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#e05555'}}></span>S</span>
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#e0884a'}}></span>A</span>
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#c9a84c'}}></span>B</span>
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#6a8da6'}}></span>C</span>
+                <span className="tier-legend-item"><span className="tier-dot" style={{background:'#5a5c78'}}></span>D</span>
                 <span className="tier-info-wrap">
                     <span className="tier-info-btn">?</span>
                     <span className="tier-tooltip">{props.tooltip}</span>
@@ -241,9 +243,123 @@ function SidebarCharts(props) {
     );
 }
 
+var ALLEGIANCE_COLORS = {
+    'Imperium': 'var(--allegiance-imperium)',
+    'Chaos': 'var(--allegiance-chaos)',
+    'Xenos': 'var(--allegiance-xenos)',
+    'Unknown': 'var(--allegiance-unknown)',
+};
+
+function AllegianceFilter(props) {
+    var active = props.active;
+    var onChange = props.onChange;
+    var options = ['All', 'Imperium', 'Chaos', 'Xenos'];
+
+    return (
+        <div className="allegiance-filters">
+            {options.map(function(opt) {
+                return (
+                    <button key={opt}
+                        className={'allegiance-filter-btn' + (active === opt ? ' active' : '')}
+                        data-allegiance={opt}
+                        onClick={function() { onChange(opt); }}>
+                        {opt}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+function FactionCardRow(props) {
+    var f = props.faction;
+    var idx = props.globalIdx;
+    var metaTiers = props.metaTiers;
+    var winTiers = props.winTiers;
+    var maxMeta = props.maxMeta;
+    var maxWin = props.maxWin;
+    var maxTop4 = props.maxTop4;
+    var isExpanded = props.isExpanded;
+    var onToggle = props.onToggle;
+    var onSelectFaction = props.onSelectFaction;
+
+    var t = metaTiers[idx];
+    var metaPct = maxMeta > 0 ? (f.meta_share / maxMeta) * 100 : 0;
+    var winPct = maxWin > 0 ? (f.win_rate / maxWin) * 100 : 0;
+    var top4Pct = maxTop4 > 0 ? (f.top4_rate / maxTop4) * 100 : 0;
+
+    return (
+        <div className={'faction-card' + (isExpanded ? ' expanded' : '')}>
+            <div className="faction-card-row" onClick={onToggle}>
+                <span className="tier-badge" title={'Tier ' + tierLabel(t) + ' \u2014 based on meta share percentile'} style={{background: tierColor(t)}}>{tierLabel(t)}</span>
+                <span className="faction-name">{f.faction}</span>
+                <span className="fc-stat" title="Meta share \u2014 % of all tournament placements"><span className="fc-stat-icon">{'\u25ce'}</span>{f.meta_share}%</span>
+                <span className="fc-stat" title="Win rate \u2014 1st place finishes / total appearances"><span className="fc-stat-icon">{'\u2691'}</span>{f.win_rate}%</span>
+                <span className="fc-stat-count" title="Total player appearances"><span className="fc-stat-icon">{'\u2302'}</span>{f.count}</span>
+                <span className={'fc-chevron' + (isExpanded ? ' open' : '')}>{'\u25b6'}</span>
+            </div>
+            <div className={'faction-card-body' + (isExpanded ? ' open' : '')}>
+                <div className="faction-card-bars">
+                    <div className="fc-bar-row">
+                        <span className="fc-bar-label">Meta</span>
+                        <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: metaPct + '%', background: tierColor(t)}}></div></div>
+                        <span className="fc-bar-val">{f.meta_share}%</span>
+                    </div>
+                    <div className="fc-bar-row">
+                        <span className="fc-bar-label">Wins</span>
+                        <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: winPct + '%', background: tierColor(winTiers[idx])}}></div></div>
+                        <span className="fc-bar-val">{f.win_rate}%</span>
+                    </div>
+                    <div className="fc-bar-row">
+                        <span className="fc-bar-label">Top4</span>
+                        <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: top4Pct + '%', background: 'var(--tier-c)'}}></div></div>
+                        <span className="fc-bar-val">{f.top4_rate}%</span>
+                    </div>
+                </div>
+                {f.top_detachments && f.top_detachments.length > 0 && (
+                    <div className="fc-mini-chart">
+                        <div className="fc-mini-chart-title">Detachments</div>
+                        {f.top_detachments.map(function(d) {
+                            var pct = f.top_detachments[0].count > 0 ? (d.count / f.top_detachments[0].count) * 100 : 0;
+                            return (
+                                <div key={d.name} className="fc-mini-bar-row">
+                                    <span className="fc-mini-bar-label">{d.name}</span>
+                                    <div className="fc-mini-bar-track"><div className="fc-mini-bar-fill" style={{width: pct + '%', background: 'var(--gold)'}}></div></div>
+                                    <span className="fc-mini-bar-val">{d.count}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+                {f.top_units && f.top_units.length > 0 && (
+                    <div className="fc-mini-chart">
+                        <div className="fc-mini-chart-title">Popular Units</div>
+                        {f.top_units.slice(0, 4).map(function(u) {
+                            var pct = f.top_units[0].count > 0 ? (u.count / f.top_units[0].count) * 100 : 0;
+                            return (
+                                <div key={u.name} className="fc-mini-bar-row">
+                                    <span className="fc-mini-bar-label">{u.name}</span>
+                                    <div className="fc-mini-bar-track"><div className="fc-mini-bar-fill" style={{width: pct + '%', background: 'var(--tier-c)'}}></div></div>
+                                    <span className="fc-mini-bar-val">{u.count}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+                <span className="fc-view-details" onClick={function(e) { e.stopPropagation(); onSelectFaction(f.faction); }}>{'\u2192'} Details</span>
+            </div>
+        </div>
+    );
+}
+
 function FactionCards(props) {
     var factions = props.factions;
     var onSelectFaction = props.onSelectFaction;
+    var allegianceFilter = props.allegianceFilter || 'All';
+    var expandRef = React.useState(null);
+    var expandedKey = expandRef[0]; var setExpandedKey = expandRef[1];
+    var groupOpenRef = React.useState({ 'Imperium': true, 'Chaos': true, 'Xenos': true, 'Unknown': true });
+    var groupOpen = groupOpenRef[0]; var setGroupOpen = groupOpenRef[1];
 
     if (!factions || factions.length === 0) {
         return <div className="loading">No faction data</div>;
@@ -255,72 +371,79 @@ function FactionCards(props) {
     var maxWin = Math.max.apply(null, factions.map(function(f) { return f.win_rate; }));
     var maxTop4 = Math.max.apply(null, factions.map(function(f) { return f.top4_rate; }));
 
+    // Build global index map for tier lookups
+    var indexByFaction = {};
+    factions.forEach(function(f, i) { indexByFaction[f.faction] = i; });
+
+    // Group factions by allegiance
+    var groups = {};
+    var groupOrder = ['Imperium', 'Chaos', 'Xenos', 'Unknown'];
+    groupOrder.forEach(function(g) { groups[g] = []; });
+    factions.forEach(function(f) {
+        var a = f.allegiance || 'Unknown';
+        if (!groups[a]) groups[a] = [];
+        groups[a].push(f);
+    });
+
+    // Filter by allegiance if not "All"
+    var visibleGroups = allegianceFilter === 'All' ? groupOrder : [allegianceFilter];
+
+    function toggleGroup(name) {
+        setGroupOpen(function(prev) {
+            var next = Object.assign({}, prev);
+            next[name] = !prev[name];
+            return next;
+        });
+    }
+
     return (
         <div className="faction-cards">
-            {factions.map(function(f, i) {
-                var t = metaTiers[i];
-                var metaPct = maxMeta > 0 ? (f.meta_share / maxMeta) * 100 : 0;
-                var winPct = maxWin > 0 ? (f.win_rate / maxWin) * 100 : 0;
-                var top4Pct = maxTop4 > 0 ? (f.top4_rate / maxTop4) * 100 : 0;
+            <div className="fc-column-headers">
+                <span className="fc-col-tier">Tier</span>
+                <span className="fc-col-faction">Faction</span>
+                <span className="fc-col-stat">Meta%</span>
+                <span className="fc-col-stat">Win%</span>
+                <span className="fc-col-stat">Players</span>
+                <span className="fc-col-chevron"></span>
+            </div>
+            {visibleGroups.map(function(groupName) {
+                var groupFactions = groups[groupName] || [];
+                if (groupFactions.length === 0) return null;
+                var totalPlayers = groupFactions.reduce(function(s, f) { return s + f.count; }, 0);
+                var isOpen = groupOpen[groupName] !== false;
+                var indicatorClass = 'allegiance-group-indicator ' + groupName.toLowerCase();
 
                 return (
-                    <div key={f.faction} className="faction-card" onClick={function() { onSelectFaction(f.faction); }} style={{cursor:'pointer'}}>
-                        <div className="faction-card-header">
-                            <span className="faction-name">{f.faction}</span>
-                            <span className="tier-badge" style={{background: tierColor(t)}}>{tierLabel(t)}</span>
+                    <div key={groupName} className="allegiance-group">
+                        <div className="allegiance-group-header" onClick={function() { toggleGroup(groupName); }}>
+                            <span className={indicatorClass}></span>
+                            <span className="allegiance-group-name">{groupName}</span>
+                            <span className="allegiance-group-count">{totalPlayers} players</span>
+                            <span className={'allegiance-group-chevron' + (isOpen ? ' open' : '')}>{'\u25b6'}</span>
                         </div>
-                        <div className="faction-stats">
-                            <span><span className="faction-stat-value">{f.count}</span> players</span>
-                            <span><span className="faction-stat-value">{f.first_place_count}</span> wins</span>
-                            <span><span className="faction-stat-value">{f.top4_count}</span> top-4</span>
-                        </div>
-                        <div className="faction-card-bars">
-                            <div className="fc-bar-row">
-                                <span className="fc-bar-label">Meta</span>
-                                <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: metaPct + '%', background: tierColor(t)}}></div></div>
-                                <span className="fc-bar-val">{f.meta_share}%</span>
-                            </div>
-                            <div className="fc-bar-row">
-                                <span className="fc-bar-label">Wins</span>
-                                <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: winPct + '%', background: tierColor(winTiers[i])}}></div></div>
-                                <span className="fc-bar-val">{f.win_rate}%</span>
-                            </div>
-                            <div className="fc-bar-row">
-                                <span className="fc-bar-label">Top4</span>
-                                <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: top4Pct + '%', background: 'var(--tier-c)'}}></div></div>
-                                <span className="fc-bar-val">{f.top4_rate}%</span>
-                            </div>
-                        </div>
-                        {f.top_detachments && f.top_detachments.length > 0 && (
-                            <div className="fc-mini-chart">
-                                <div className="fc-mini-chart-title">Detachments</div>
-                                {f.top_detachments.map(function(d) {
-                                    var pct = f.top_detachments[0].count > 0 ? (d.count / f.top_detachments[0].count) * 100 : 0;
+                        <div className={'allegiance-group-body' + (isOpen ? ' open' : '')}>
+                            <div className="allegiance-group-cards">
+                                {groupFactions.map(function(f) {
+                                    var globalIdx = indexByFaction[f.faction];
+                                    var cardKey = f.faction;
                                     return (
-                                        <div key={d.name} className="fc-mini-bar-row">
-                                            <span className="fc-mini-bar-label">{d.name}</span>
-                                            <div className="fc-mini-bar-track"><div className="fc-mini-bar-fill" style={{width: pct + '%', background: 'var(--gold)'}}></div></div>
-                                            <span className="fc-mini-bar-val">{d.count}</span>
-                                        </div>
+                                        <FactionCardRow
+                                            key={cardKey}
+                                            faction={f}
+                                            globalIdx={globalIdx}
+                                            metaTiers={metaTiers}
+                                            winTiers={winTiers}
+                                            maxMeta={maxMeta}
+                                            maxWin={maxWin}
+                                            maxTop4={maxTop4}
+                                            isExpanded={expandedKey === cardKey}
+                                            onToggle={function() { setExpandedKey(expandedKey === cardKey ? null : cardKey); }}
+                                            onSelectFaction={onSelectFaction}
+                                        />
                                     );
                                 })}
                             </div>
-                        )}
-                        {f.top_units && f.top_units.length > 0 && (
-                            <div className="fc-mini-chart">
-                                <div className="fc-mini-chart-title">Popular Units</div>
-                                {f.top_units.slice(0, 4).map(function(u) {
-                                    var pct = f.top_units[0].count > 0 ? (u.count / f.top_units[0].count) * 100 : 0;
-                                    return (
-                                        <div key={u.name} className="fc-mini-bar-row">
-                                            <span className="fc-mini-bar-label">{u.name}</span>
-                                            <div className="fc-mini-bar-track"><div className="fc-mini-bar-fill" style={{width: pct + '%', background: 'var(--tier-c)'}}></div></div>
-                                            <span className="fc-mini-bar-val">{u.count}</span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
+                        </div>
                     </div>
                 );
             })}
@@ -522,13 +645,15 @@ function FactionDetail(props) {
 
     // Count lists matched
     var listsMatched = data.winners.filter(function(w) { return w.army_list != null; }).length;
+    var unmatchedLists = data.unmatched_lists || [];
+    var totalLists = listsMatched + unmatchedLists.length;
 
     return (
         <div className="detail-view">
             <button className="back-btn" onClick={onBack}>{'\u2190'} Back</button>
             <div className="detail-header">
                 <h2>{factionName}</h2>
-                <div className="event-meta">{data.winners.length} top-4 finishes · {listsMatched} lists</div>
+                <div className="event-meta">{data.winners.length} top-4 finishes · {totalLists} lists</div>
             </div>
 
             {(data.detachment_breakdown && data.detachment_breakdown.length > 0) || (data.top_units && data.top_units.length > 0) ? (
@@ -560,6 +685,36 @@ function FactionDetail(props) {
                     );
                 })}
             </div>
+
+            {unmatchedLists.length > 0 ? (
+                <div>
+                    <div className="section-title">Unlinked Lists</div>
+                    <div className="event-list">
+                        {unmatchedLists.map(function(ul, i) {
+                            var key = 'unmatched-' + i;
+                            return (
+                                <div key={key} className="placement-row">
+                                    <div className="placement-header clickable" onClick={function() { toggleList(key); }}>
+                                        <span className="rank-cell">?</span>
+                                        <span className="placement-player">{ul.player_name || 'Unknown Player'}</span>
+                                        {ul.event_id ? (
+                                            <span className="placement-event-link" onClick={function(e) { e.stopPropagation(); onSelectEvent(ul.event_id); }}>{ul.event_name || 'Unknown Event'}</span>
+                                        ) : (
+                                            <span className="placement-event-link">{ul.total_points}pts</span>
+                                        )}
+                                        <span className="placement-det">{ul.detachment || '\u2014'}</span>
+                                        {ul.event_date ? <span className="placement-date">{ul.event_date}</span> : null}
+                                        <span className={'list-indicator ' + (expanded[key] ? 'open' : '')} title="View army list">{'\u25b6'}</span>
+                                    </div>
+                                    {expanded[key] ? (
+                                        <ArmyListDisplay list={ul.list} />
+                                    ) : null}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -751,6 +906,7 @@ function App() {
     var ref10 = React.useState(null); var dateTo = ref10[0]; var setDateTo = ref10[1];
     var ref11 = React.useState(null); var dateMin = ref11[0]; var setDateMin = ref11[1];
     var ref12 = React.useState(null); var dateMax = ref12[0]; var setDateMax = ref12[1];
+    var ref13 = React.useState('All'); var allegianceFilter = ref13[0]; var setAllegianceFilter = ref13[1];
     var debounceRef = React.useRef(null);
 
     function loadData(epoch, from, to) {
@@ -887,37 +1043,48 @@ function App() {
         );
     }
 
+    var CHEVRON_COLORS = ['#3b7dd8','#4a9a6e','#d4883e','#c75454','#8b6fb0','#4aafaf','#c9a84c','#5a8f7a'];
+
     return (
         <div>
             <div className="header">
                 <h1>40K META TRACKER</h1>
-                <div className="epoch-bar">
-                    {epochs.filter(function(epoch) { return epoch.event_count > 0; }).map(function(epoch) {
+                <div className="epoch-timeline">
+                    {epochs.filter(function(epoch) { return epoch.event_count > 0; }).map(function(epoch, i, arr) {
                         var isActive = epoch.id === activeEpoch;
-                        var dateRange = '';
-                        if (epoch.start_date) {
-                            dateRange = epoch.start_date + ' \u2013 ' + (epoch.end_date || 'now');
-                        }
+                        var color = CHEVRON_COLORS[i % CHEVRON_COLORS.length];
+                        var isFirst = i === 0;
+                        var cp = isFirst
+                            ? 'polygon(0% 0%, calc(100% - 18px) 0%, 100% 50%, calc(100% - 18px) 100%, 0% 100%)'
+                            : 'polygon(0% 0%, calc(100% - 18px) 0%, 100% 50%, calc(100% - 18px) 100%, 0% 100%, 18px 50%)';
                         return (
-                            <span key={epoch.id}
-                                className={'epoch-pill ' + (isActive ? 'active' : '')}
+                            <div key={epoch.id}
+                                className={'epoch-chevron' + (isActive ? ' active' : '')}
+                                style={{
+                                    background: color,
+                                    opacity: isActive ? 1 : 0.5,
+                                    clipPath: cp
+                                }}
                                 onClick={function() { handleEpochChange(epoch.id); }}>
-                                <span className="epoch-pill-label">{epoch.label}</span>
-                                {dateRange && <span className="epoch-pill-dates">{dateRange}</span>}
-                                <span className="epoch-pill-count">{epoch.event_count} events</span>
-                            </span>
+                                <span className="chevron-label">{epoch.label}</span>
+                                <span className="chevron-meta">{epoch.event_count} events</span>
+                            </div>
                         );
                     })}
                 </div>
-                {dateMin && dateMax && (
-                    <TimeSlider minDate={dateMin} maxDate={dateMax} fromDate={dateFrom} toDate={dateTo} onChange={handleDateRangeChange} />
-                )}
             </div>
             <div className="layout">
                 <div className="sidebar">
-                    <SidebarCharts factions={factions} onSelectFaction={handleSelectFaction} />
-                    <h2 style={{marginTop: '8px'}}>Factions</h2>
-                    <FactionCards factions={factions} onSelectFaction={handleSelectFaction} />
+                    {dateMin && dateMax && (
+                        <div className="sidebar-slider">
+                            <div className="sidebar-slider-label">Date Range</div>
+                            <TimeSlider minDate={dateMin} maxDate={dateMax} fromDate={dateFrom} toDate={dateTo} onChange={handleDateRangeChange} />
+                        </div>
+                    )}
+                    <AllegianceFilter active={allegianceFilter} onChange={setAllegianceFilter} />
+                    <SidebarCharts factions={allegianceFilter === 'All' ? factions : (factions || []).filter(function(f) { return f.allegiance === allegianceFilter; })} onSelectFaction={handleSelectFaction} />
+                    <h2 className="section-heading" style={{marginTop: '8px'}}>Factions</h2>
+                    <FactionCards factions={factions} onSelectFaction={handleSelectFaction} allegianceFilter={allegianceFilter} />
                 </div>
                 <div className="main">
                     {mainContent}

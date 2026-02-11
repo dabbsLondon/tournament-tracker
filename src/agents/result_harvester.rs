@@ -194,8 +194,8 @@ const RESULT_HARVESTER_SYSTEM_PROMPT: &str = r#"You are extracting tournament re
 For each placing player, extract:
 - rank: Final position (1 = winner, 2 = second, etc.)
 - player_name: Player name as shown
-- faction: Main faction (e.g., "Aeldari", "Space Marines", "Death Guard")
-- subfaction: Subfaction if mentioned (e.g., "Ynnari", "Black Templars")
+- faction: Main faction — MUST be one of the canonical faction names listed below
+- subfaction: Subfaction if mentioned (e.g., "Ynnari", "Ultramarines")
 - detachment: Detachment name if shown
 - wins: Number of wins (integer, null if not shown)
 - losses: Number of losses (integer, null if not shown)
@@ -203,6 +203,42 @@ For each placing player, extract:
 - battle_points: Total battle points if shown
 - army_list: Full army list text if present (preserve formatting)
 - confidence: "high", "medium", or "low"
+
+CANONICAL FACTION NAMES (use EXACTLY one of these for the "faction" field):
+  Space Marines               Blood Angels
+  Dark Angels                 Space Wolves
+  Black Templars              Deathwatch
+  Grey Knights                Adepta Sororitas
+  Adeptus Custodes            Adeptus Mechanicus
+  Astra Militarum             Imperial Knights
+  Agents of the Imperium
+  Chaos Space Marines         Death Guard
+  Thousand Sons               World Eaters
+  Emperor's Children          Chaos Daemons
+  Chaos Knights
+  Aeldari                     Drukhari
+  Tyranids                    Genestealer Cults
+  Leagues of Votann           Necrons
+  Orks                        T'au Empire
+
+SPACE MARINE CHAPTER IDENTIFICATION:
+You MUST identify the specific Space Marine chapter when the article mentions one.
+Use the chapter name as the "faction" field for codex-supplement chapters.
+
+  These are DISTINCT factions (use chapter name as "faction"):
+    Blood Angels, Dark Angels, Space Wolves, Black Templars, Deathwatch, Grey Knights
+
+  These are subfactions (use "Space Marines" as faction, chapter name as "subfaction"):
+    Ultramarines, Iron Hands, Salamanders, Raven Guard, White Scars, Imperial Fists,
+    Crimson Fists, Flesh Tearers, Black Dragons
+
+  Common abbreviations in articles:
+    BA = Blood Angels, DA = Dark Angels, SW = Space Wolves,
+    BT = Black Templars, DW = Deathwatch, GK = Grey Knights,
+    UM = Ultramarines, IF = Imperial Fists, IH = Iron Hands,
+    RG = Raven Guard, SM = Space Marines
+
+  Look for chapter names in parentheses, e.g. "Space Marines (Dark Angels)" → faction: "Dark Angels"
 
 Results are typically shown as:
 - "1st - PlayerName (Faction) - 5-0"
@@ -233,7 +269,7 @@ If no placements found, return: {"placements": []}
 IMPORTANT:
 - Extract placements in order (1st, 2nd, 3rd...)
 - Do NOT invent player names or factions
-- Use canonical faction names (Space Marines not SM)
+- Use canonical faction names from the list above
 - Include full army list text if available
 - Set confidence to "low" for uncertain entries"#;
 
