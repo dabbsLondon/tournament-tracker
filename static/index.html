@@ -17,11 +17,12 @@
 // ── API Client ──────────────────────────────────────────────────
 
 const Api = {
-    async getEvents(page, pageSize, epoch, from, to) {
+    async getEvents(page, pageSize, epoch, from, to, hasResults) {
         var params = 'page=' + (page||1) + '&page_size=' + (pageSize||20);
         if (epoch && epoch !== 'current') params += '&epoch=' + encodeURIComponent(epoch);
         if (from) params += '&from=' + from;
         if (to) params += '&to=' + to;
+        if (hasResults) params += '&has_results=true';
         const res = await fetch('/api/events?' + params);
         if (!res.ok) throw new Error('Events API error: ' + res.status);
         return res.json();
@@ -60,6 +61,47 @@ const Api = {
         if (epoch && epoch !== 'current') params = '?epoch=' + encodeURIComponent(epoch);
         const res = await fetch('/api/meta/allegiances' + params);
         if (!res.ok) throw new Error('Allegiances API error: ' + res.status);
+        return res.json();
+    },
+    async getBalancePasses() {
+        const res = await fetch('/api/balance');
+        if (!res.ok) throw new Error('Balance API error: ' + res.status);
+        return res.json();
+    },
+    async getBalancePass(id) {
+        const res = await fetch('/api/balance/' + encodeURIComponent(id));
+        if (!res.ok) throw new Error('Balance detail API error: ' + res.status);
+        return res.json();
+    },
+    async getAnalyticsOverview(epoch) {
+        var params = epoch ? '?epoch=' + encodeURIComponent(epoch) : '';
+        const res = await fetch('/api/analytics/overview' + params);
+        if (!res.ok) throw new Error('Analytics overview API error: ' + res.status);
+        return res.json();
+    },
+    async getAnalyticsTrends(factions) {
+        var params = factions ? '?factions=' + encodeURIComponent(factions) : '';
+        const res = await fetch('/api/analytics/trends' + params);
+        if (!res.ok) throw new Error('Analytics trends API error: ' + res.status);
+        return res.json();
+    },
+    async getAnalyticsUnits(epoch, faction, limit) {
+        var parts = [];
+        if (epoch) parts.push('epoch=' + encodeURIComponent(epoch));
+        if (faction) parts.push('faction=' + encodeURIComponent(faction));
+        if (limit) parts.push('limit=' + limit);
+        var params = parts.length > 0 ? '?' + parts.join('&') : '';
+        const res = await fetch('/api/analytics/units' + params);
+        if (!res.ok) throw new Error('Analytics units API error: ' + res.status);
+        return res.json();
+    },
+    async getAnalyticsPlayers(epoch, limit) {
+        var parts = [];
+        if (epoch) parts.push('epoch=' + encodeURIComponent(epoch));
+        if (limit) parts.push('limit=' + limit);
+        var params = parts.length > 0 ? '?' + parts.join('&') : '';
+        const res = await fetch('/api/analytics/players' + params);
+        if (!res.ok) throw new Error('Analytics players API error: ' + res.status);
         return res.json();
     }
 };
@@ -250,6 +292,87 @@ var ALLEGIANCE_COLORS = {
     'Unknown': 'var(--allegiance-unknown)',
 };
 
+var FACTION_ICONS = {
+    'Space Marines': { abbr: 'SM', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/d/d5/Adeptus_Astartes.jpg/220px-Adeptus_Astartes.jpg' },
+    'Blood Angels': { abbr: 'BA', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/e/e5/Bloodangelsymbol.png/200px-Bloodangelsymbol.png' },
+    'Dark Angels': { abbr: 'DA', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/9/95/Darkangelsymbol.png/200px-Darkangelsymbol.png' },
+    'Space Wolves': { abbr: 'SW', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/4/4f/Spacewolvesymbol.png/200px-Spacewolvesymbol.png' },
+    'Black Templars': { abbr: 'BT', img: 'https://wh40k.lexicanum.com/mediawiki/images/5/58/BlackTemplarssymbol.png' },
+    'Grey Knights': { abbr: 'GK', img: 'https://wh40k.lexicanum.com/mediawiki/images/1/12/Grey_Knights_symbol.png' },
+    'Ultramarines': { abbr: 'UM', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/6/67/Ultramarinessymbol.png/200px-Ultramarinessymbol.png' },
+    'Deathwatch': { abbr: 'DW', img: 'https://wh40k.lexicanum.com/mediawiki/images/0/06/Deathwatchsymbol2.png' },
+    'Iron Hands': { abbr: 'IH', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/d/d5/Adeptus_Astartes.jpg/220px-Adeptus_Astartes.jpg' },
+    'Raven Guard': { abbr: 'RG', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/d/d5/Adeptus_Astartes.jpg/220px-Adeptus_Astartes.jpg' },
+    'Salamanders': { abbr: 'SA', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/d/d5/Adeptus_Astartes.jpg/220px-Adeptus_Astartes.jpg' },
+    'Imperial Fists': { abbr: 'IF', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/d/d5/Adeptus_Astartes.jpg/220px-Adeptus_Astartes.jpg' },
+    'White Scars': { abbr: 'WS', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/d/d5/Adeptus_Astartes.jpg/220px-Adeptus_Astartes.jpg' },
+    'Crimson Fists': { abbr: 'CF', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/d/d5/Adeptus_Astartes.jpg/220px-Adeptus_Astartes.jpg' },
+    'Flesh Tearers': { abbr: 'FT', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/e/e5/Bloodangelsymbol.png/200px-Bloodangelsymbol.png' },
+    'Adepta Sororitas': { abbr: 'AS', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/e/e2/Sisters_symbol.png/193px-Sisters_symbol.png' },
+    'Adeptus Custodes': { abbr: 'AC', img: 'https://wh40k.lexicanum.com/mediawiki/images/e/e3/CustodesSymbolClear.png' },
+    'Adeptus Mechanicus': { abbr: 'AM', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/d/db/Machina_Opus.png/220px-Machina_Opus.png' },
+    'Astra Militarum': { abbr: 'IG', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/3/3d/Astra_Militarum_Symbol.png/220px-Astra_Militarum_Symbol.png' },
+    'Imperial Knights': { abbr: 'IK', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/4/46/Imperial-Knights-Symbol.jpg/220px-Imperial-Knights-Symbol.jpg' },
+    'Agents of the Imperium': { abbr: 'AI', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/a/a4/Inquisiton.png/220px-Inquisiton.png' },
+    'Chaos Space Marines': { abbr: 'CSM', img: 'https://wh40k.lexicanum.com/mediawiki/images/8/8f/Chaos.png' },
+    'Death Guard': { abbr: 'DG', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/9/97/Deathguardsymbol.png/200px-Deathguardsymbol.png' },
+    'Thousand Sons': { abbr: 'TS', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/8/86/TSicon.png/200px-TSicon.png' },
+    'World Eaters': { abbr: 'WE', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/f/fc/WorldEaters.png/200px-WorldEaters.png' },
+    "Emperor's Children": { abbr: 'EC', img: 'https://wh40k.lexicanum.com/mediawiki/images/e/e4/ECSymbolChaos.jpg' },
+    'Chaos Daemons': { abbr: 'CD', img: 'https://wh40k.lexicanum.com/mediawiki/images/8/8f/Chaos.png' },
+    'Chaos Knights': { abbr: 'CK', img: 'https://wh40k.lexicanum.com/mediawiki/images/8/8f/Chaos.png' },
+    'Aeldari': { abbr: 'AE', img: 'https://wh40k.lexicanum.com/mediawiki/images/0/0d/AsuryaniRune.jpg' },
+    'Drukhari': { abbr: 'DR', img: 'https://wh40k.lexicanum.com/mediawiki/images/d/d7/DarkEldar.png' },
+    'Tyranids': { abbr: 'TY', img: 'https://wh40k.lexicanum.com/mediawiki/images/e/e1/Tyranid_logo.png' },
+    'Genestealer Cults': { abbr: 'GSC', img: 'https://wh40k.lexicanum.com/mediawiki/images/0/04/Tyranids.png' },
+    'Necrons': { abbr: 'NE', img: 'https://wh40k.lexicanum.com/mediawiki/images/f/f5/NecronPortal.jpg' },
+    'Orks': { abbr: 'OR', img: 'https://wh40k.lexicanum.com/mediawiki/images/6/6e/Orks.png' },
+    "T'au Empire": { abbr: 'TAU', img: 'https://wh40k.lexicanum.com/mediawiki/images/thumb/f/f3/Tau_Sept_Symbol.png/220px-Tau_Sept_Symbol.png' },
+    'Leagues of Votann': { abbr: 'LV', img: 'https://wh40k.lexicanum.com/mediawiki/images/d/d9/LOVSymbolTransparent.png' },
+};
+
+var FACTION_ALLEGIANCE_MAP = {
+    'Space Marines': 'Imperium', 'Blood Angels': 'Imperium',
+    'Dark Angels': 'Imperium', 'Space Wolves': 'Imperium',
+    'Black Templars': 'Imperium', 'Grey Knights': 'Imperium',
+    'Ultramarines': 'Imperium', 'Deathwatch': 'Imperium',
+    'Iron Hands': 'Imperium', 'Raven Guard': 'Imperium',
+    'Salamanders': 'Imperium', 'Imperial Fists': 'Imperium',
+    'White Scars': 'Imperium', 'Crimson Fists': 'Imperium',
+    'Flesh Tearers': 'Imperium',
+    'Adepta Sororitas': 'Imperium', 'Adeptus Custodes': 'Imperium',
+    'Adeptus Mechanicus': 'Imperium', 'Astra Militarum': 'Imperium',
+    'Imperial Knights': 'Imperium', 'Agents of the Imperium': 'Imperium',
+    'Chaos Space Marines': 'Chaos', 'Death Guard': 'Chaos',
+    'Thousand Sons': 'Chaos', 'World Eaters': 'Chaos',
+    "Emperor's Children": 'Chaos', 'Chaos Daemons': 'Chaos',
+    'Chaos Knights': 'Chaos',
+    'Aeldari': 'Xenos', 'Drukhari': 'Xenos',
+    'Tyranids': 'Xenos', 'Genestealer Cults': 'Xenos',
+    'Necrons': 'Xenos', 'Orks': 'Xenos',
+    "T'au Empire": 'Xenos', 'Leagues of Votann': 'Xenos',
+};
+
+var FACTION_ICON_COLORS = { Imperium: '#4a6fa5', Chaos: '#c75454', Xenos: '#4a9a6e', Unknown: '#7a7d8a' };
+
+function FactionIcon(props) {
+    var info = FACTION_ICONS[props.name];
+    if (!info) return null;
+    var allegiance = props.allegiance || FACTION_ALLEGIANCE_MAP[props.name] || 'Unknown';
+    var size = props.size || 20;
+    var imgErrorRef = React.useState(false);
+    var imgError = imgErrorRef[0]; var setImgError = imgErrorRef[1];
+    if (info.img && !imgError) {
+        return <img className="faction-icon-img" src={info.img} alt={info.abbr}
+            title={props.name} width={size} height={size}
+            onError={function() { setImgError(true); }} />;
+    }
+    return <span className="faction-icon" title={props.name}
+        style={{ background: FACTION_ICON_COLORS[allegiance] || FACTION_ICON_COLORS.Unknown }}>
+        {info.abbr}
+    </span>;
+}
+
 function AllegianceFilter(props) {
     var active = props.active;
     var onChange = props.onChange;
@@ -291,12 +414,17 @@ function FactionCardRow(props) {
     return (
         <div className={'faction-card' + (isExpanded ? ' expanded' : '')}>
             <div className="faction-card-row" onClick={onToggle}>
-                <span className="tier-badge" title={'Tier ' + tierLabel(t) + ' \u2014 based on meta share percentile'} style={{background: tierColor(t)}}>{tierLabel(t)}</span>
-                <span className="faction-name">{f.faction}</span>
-                <span className="fc-stat" title="Meta share \u2014 % of all tournament placements"><span className="fc-stat-icon">{'\u25ce'}</span>{f.meta_share}%</span>
-                <span className="fc-stat" title="Win rate \u2014 1st place finishes / total appearances"><span className="fc-stat-icon">{'\u2691'}</span>{f.win_rate}%</span>
-                <span className="fc-stat-count" title="Total player appearances"><span className="fc-stat-icon">{'\u2302'}</span>{f.count}</span>
-                <span className={'fc-chevron' + (isExpanded ? ' open' : '')}>{'\u25b6'}</span>
+                <div className="fc-row-top">
+                    <span className="tier-badge" title={'Tier ' + tierLabel(t) + ' \u2014 based on meta share percentile'} style={{background: tierColor(t)}}>{tierLabel(t)}</span>
+                    <FactionIcon name={f.faction} allegiance={f.allegiance} />
+                    <span className="faction-name">{f.faction}</span>
+                    <span className={'fc-chevron' + (isExpanded ? ' open' : '')}>{'\u25b6'}</span>
+                </div>
+                <div className="fc-row-stats">
+                    <span className="fc-stat" title="Meta share \u2014 % of all tournament placements"><span className="fc-stat-icon">{'\u25ce'}</span>Meta {f.meta_share}%</span>
+                    <span className="fc-stat" title="Win rate \u2014 1st place finishes / total appearances"><span className="fc-stat-icon">{'\u2691'}</span>Win {f.win_rate}%</span>
+                    <span className="fc-stat-count" title="Total player appearances"><span className="fc-stat-icon">{'\u2302'}</span>{f.count} players</span>
+                </div>
             </div>
             <div className={'faction-card-body' + (isExpanded ? ' open' : '')}>
                 <div className="faction-card-bars">
@@ -398,14 +526,6 @@ function FactionCards(props) {
 
     return (
         <div className="faction-cards">
-            <div className="fc-column-headers">
-                <span className="fc-col-tier">Tier</span>
-                <span className="fc-col-faction">Faction</span>
-                <span className="fc-col-stat">Meta%</span>
-                <span className="fc-col-stat">Win%</span>
-                <span className="fc-col-stat">Players</span>
-                <span className="fc-col-chevron"></span>
-            </div>
             {visibleGroups.map(function(groupName) {
                 var groupFactions = groups[groupName] || [];
                 if (groupFactions.length === 0) return null;
@@ -652,7 +772,7 @@ function FactionDetail(props) {
         <div className="detail-view">
             <button className="back-btn" onClick={onBack}>{'\u2190'} Back</button>
             <div className="detail-header">
-                <h2>{factionName}</h2>
+                <h2><FactionIcon name={factionName} />{factionName}</h2>
                 <div className="event-meta">{data.winners.length} top-4 finishes · {totalLists} lists</div>
             </div>
 
@@ -696,7 +816,7 @@ function FactionDetail(props) {
                                 <div key={key} className="placement-row">
                                     <div className="placement-header clickable" onClick={function() { toggleList(key); }}>
                                         <span className="rank-cell">?</span>
-                                        <span className="placement-player">{ul.player_name || 'Unknown Player'}</span>
+                                        <span className="placement-player">Unnamed</span>
                                         {ul.event_id ? (
                                             <span className="placement-event-link" onClick={function(e) { e.stopPropagation(); onSelectEvent(ul.event_id); }}>{ul.event_name || 'Unknown Event'}</span>
                                         ) : (
@@ -739,6 +859,18 @@ function EventList(props) {
                             <div className="event-card-header">
                                 <span className="event-name">{event.name}</span>
                                 {event.player_count ? <span className="event-players">{event.player_count} players</span> : null}
+                                <div className="event-badges">
+                                    {event.has_lists && <span className="event-icon-badge has-lists" title="Army lists available">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                    </span>}
+                                    {event.completed
+                                        ? <span className="event-icon-badge completed" title="Completed">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                        </span>
+                                        : <span className="event-icon-badge upcoming" title="Upcoming">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                        </span>}
+                                </div>
                             </div>
                             <div className="event-meta">
                                 {event.date}
@@ -748,7 +880,7 @@ function EventList(props) {
                             {event.winner ? (
                                 <div className="event-winner">
                                     <span className="event-winner-label">Winner: </span>
-                                    {event.winner.player_name} ({event.winner.faction}
+                                    {event.winner.player_name} (<FactionIcon name={event.winner.faction} />{event.winner.faction}
                                     {event.winner.detachment ? ' \u2014 ' + event.winner.detachment : ''})
                                 </div>
                             ) : null}
@@ -827,7 +959,7 @@ function EventDetail(props) {
                                 <div className={'placement-header' + (haslist ? ' clickable' : '')} onClick={haslist ? function() { toggleList(key); } : undefined}>
                                     <span className={'rank-cell ' + (p.rank <= 3 ? 'rank-' + p.rank : '')}>#{p.rank}</span>
                                     <span className="placement-player">{p.player_name}</span>
-                                    <span className="placement-faction">{p.faction}</span>
+                                    <span className="placement-faction"><FactionIcon name={p.faction} />{p.faction}</span>
                                     <span className="placement-det">{p.detachment || '\u2014'}</span>
                                     <span className="placement-record">
                                         {p.record ? p.record.wins + '-' + p.record.losses + '-' + p.record.draws : '\u2014'}
@@ -842,6 +974,734 @@ function EventDetail(props) {
                     })}
                 </div>
             ) : null}
+        </div>
+    );
+}
+
+// ── Calendar View ───────────────────────────────────────────────
+
+var MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+var DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function CalendarView(props) {
+    var allEvents = props.allEvents || [];
+    var balancePasses = props.balancePasses || [];
+    var onSelectEvent = props.onSelectEvent;
+    var onSelectBalancePass = props.onSelectBalancePass;
+
+    // Default to the current month
+    var now = new Date();
+    var ref1 = React.useState(now.getFullYear());
+    var year = ref1[0]; var setYear = ref1[1];
+    var ref2 = React.useState(now.getMonth());
+    var month = ref2[0]; var setMonth = ref2[1];
+    var ref3 = React.useState(null);
+    var selectedDate = ref3[0]; var setSelectedDate = ref3[1];
+
+    // Build event lookup by date
+    var eventsByDate = {};
+    allEvents.forEach(function(ev) {
+        if (!ev.date) return;
+        if (!eventsByDate[ev.date]) eventsByDate[ev.date] = [];
+        eventsByDate[ev.date].push(ev);
+    });
+
+    // Build balance pass lookup by date
+    var bpByDate = {};
+    balancePasses.forEach(function(bp) {
+        bpByDate[bp.date] = bp;
+    });
+
+    function prevMonth() {
+        if (month === 0) { setMonth(11); setYear(year - 1); }
+        else setMonth(month - 1);
+        setSelectedDate(null);
+    }
+    function nextMonth() {
+        if (month === 11) { setMonth(0); setYear(year + 1); }
+        else setMonth(month + 1);
+        setSelectedDate(null);
+    }
+
+    // Build calendar grid
+    var firstDay = new Date(year, month, 1).getDay();
+    var daysInMonth = new Date(year, month + 1, 0).getDate();
+    var weeks = [];
+    var day = 1;
+    for (var w = 0; w < 6; w++) {
+        var week = [];
+        for (var d = 0; d < 7; d++) {
+            if ((w === 0 && d < firstDay) || day > daysInMonth) {
+                week.push(null);
+            } else {
+                week.push(day);
+                day++;
+            }
+        }
+        weeks.push(week);
+        if (day > daysInMonth) break;
+    }
+
+    var todayStr = new Date().toISOString().slice(0, 10);
+
+    // Events for selected date
+    var selectedEvents = selectedDate ? (eventsByDate[selectedDate] || []) : [];
+    var selectedBp = selectedDate ? bpByDate[selectedDate] : null;
+
+    // Upcoming events (no date selected) — show future events, or most recent if none upcoming
+    var upcomingEvents = [];
+    var upcomingLabel = 'Upcoming Events';
+    if (!selectedDate) {
+        var future = allEvents.filter(function(ev) {
+            return ev.date >= todayStr;
+        }).sort(function(a, b) {
+            return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+        });
+        if (future.length > 0) {
+            upcomingEvents = future.slice(0, 10);
+        } else {
+            // No future events — show most recent
+            upcomingLabel = 'Recent Events';
+            upcomingEvents = allEvents.slice().sort(function(a, b) {
+                return b.date > a.date ? 1 : b.date < a.date ? -1 : 0;
+            }).slice(0, 10);
+        }
+    }
+
+    return (
+        <div className="calendar-view">
+            <div className="calendar-nav">
+                <button className="cal-nav-btn" onClick={prevMonth}>{'\u2190'}</button>
+                <span className="cal-nav-title">{MONTH_NAMES[month]} {year}</span>
+                <button className="cal-nav-btn" onClick={nextMonth}>{'\u2192'}</button>
+            </div>
+            <div className="calendar-grid">
+                <div className="cal-header-row">
+                    {DAY_NAMES.map(function(dn) {
+                        return <div key={dn} className="cal-header-cell">{dn}</div>;
+                    })}
+                </div>
+                {weeks.map(function(week, wi) {
+                    return (
+                        <div key={wi} className="cal-week-row">
+                            {week.map(function(dayNum, di) {
+                                if (dayNum === null) return <div key={di} className="cal-day-cell empty"></div>;
+                                var dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(dayNum).padStart(2, '0');
+                                var dayEvents = eventsByDate[dateStr] || [];
+                                var hasBp = !!bpByDate[dateStr];
+                                var isToday = dateStr === todayStr;
+                                var isSelected = dateStr === selectedDate;
+                                var cellClass = 'cal-day-cell';
+                                if (isToday) cellClass += ' today';
+                                if (isSelected) cellClass += ' selected';
+                                if (dayEvents.length > 0) cellClass += ' has-events';
+
+                                return (
+                                    <div key={di} className={cellClass} onClick={function() { setSelectedDate(isSelected ? null : dateStr); }}>
+                                        <span className="cal-day-num">{dayNum}</span>
+                                        <div className="cal-day-indicators">
+                                            {dayEvents.length > 0 && (
+                                                <span className="cal-event-dot" title={dayEvents.length + ' tournament' + (dayEvents.length > 1 ? 's' : '')}>
+                                                    {dayEvents.length > 1 ? dayEvents.length : ''}
+                                                </span>
+                                            )}
+                                            {hasBp && <span className="cal-bp-diamond" title="Balance Pass">{'\u25c6'}</span>}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    );
+                })}
+            </div>
+
+            {selectedDate && (
+                <div className="cal-selected-section">
+                    <div className="cal-selected-header">{selectedDate}</div>
+                    {selectedBp && (
+                        <div className="cal-bp-card" onClick={function() { onSelectBalancePass(selectedBp.id); }}>
+                            <span className="cal-bp-diamond-inline">{'\u25c6'}</span>
+                            <span className="cal-bp-title">{selectedBp.title}</span>
+                            {selectedBp.has_details && <span className="cal-bp-details-tag">Details</span>}
+                        </div>
+                    )}
+                    {selectedEvents.length > 0 ? selectedEvents.map(function(ev) {
+                        return (
+                            <div key={ev.id} className="event-card" onClick={function() { onSelectEvent(ev.id); }}>
+                                <div className="event-card-header">
+                                    <span className="event-name">{ev.name}</span>
+                                    {ev.player_count ? <span className="event-players">{ev.player_count} players</span> : null}
+                                </div>
+                                <div className="event-meta">
+                                    {ev.date}
+                                    {ev.location ? ' \u00b7 ' + ev.location : ''}
+                                </div>
+                            </div>
+                        );
+                    }) : !selectedBp ? <div className="cal-no-events">No events on this date</div> : null}
+                </div>
+            )}
+
+            {!selectedDate && upcomingEvents.length > 0 && (
+                <div className="cal-selected-section">
+                    <div className="cal-selected-header">{upcomingLabel}</div>
+                    {upcomingEvents.map(function(ev) {
+                        return (
+                            <div key={ev.id} className="event-card" onClick={function() { onSelectEvent(ev.id); }}>
+                                <div className="event-card-header">
+                                    <span className="event-name">{ev.name}</span>
+                                    {ev.player_count ? <span className="event-players">{ev.player_count} players</span> : null}
+                                </div>
+                                <div className="event-meta">
+                                    {ev.date}
+                                    {ev.location ? ' \u00b7 ' + ev.location : ''}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {!selectedDate && upcomingEvents.length === 0 && (
+                <div className="cal-no-events">Select a date to see events</div>
+            )}
+        </div>
+    );
+}
+
+// ── Balance Pass List ───────────────────────────────────────────
+
+function BalancePassList(props) {
+    var balancePasses = props.balancePasses || [];
+    var onSelectBalancePass = props.onSelectBalancePass;
+
+    if (balancePasses.length === 0) {
+        return <div className="cal-no-events">No balance passes available</div>;
+    }
+
+    var sorted = balancePasses.slice().sort(function(a, b) {
+        return b.date > a.date ? 1 : b.date < a.date ? -1 : 0;
+    });
+
+    return (
+        <div className="bp-list">
+            {sorted.map(function(bp) {
+                return (
+                    <div key={bp.id} className="bp-list-card" onClick={function() { onSelectBalancePass(bp.id); }}>
+                        <div className="bp-list-card-header">
+                            <span className="bp-list-diamond">{'\u25c6'}</span>
+                            <span className="bp-list-title">{bp.title}</span>
+                            <span className="bp-list-date">{bp.date}</span>
+                        </div>
+                        {bp.summary && <div className="bp-list-summary">{bp.summary}</div>}
+                        <div className="bp-list-footer">
+                            {bp.has_details ? (
+                                <span className="bp-list-tag has-details">View Details</span>
+                            ) : (
+                                <span className="bp-list-tag no-details">No Details Yet</span>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+// ── Balance Pass Detail ─────────────────────────────────────────
+
+var DIRECTION_STYLES = {
+    buff: { bg: '#1a3a1a', color: '#4a9a6e', label: 'BUFF' },
+    nerf: { bg: '#3a1a1a', color: '#c75454', label: 'NERF' },
+    mixed: { bg: '#3a2a1a', color: '#c9a84c', label: 'MIXED' },
+    rework: { bg: '#1a2a3a', color: '#4a6fa5', label: 'REWORK' },
+};
+
+function BalancePassDetail(props) {
+    var balancePassId = props.balancePassId;
+    var onBack = props.onBack;
+
+    var ref1 = React.useState(null);
+    var data = ref1[0]; var setData = ref1[1];
+    var ref2 = React.useState(true);
+    var loading = ref2[0]; var setLoading = ref2[1];
+    var ref3 = React.useState({});
+    var expanded = ref3[0]; var setExpanded = ref3[1];
+
+    React.useEffect(function() {
+        setLoading(true);
+        Api.getBalancePass(balancePassId).then(function(d) {
+            setData(d);
+            setLoading(false);
+        }).catch(function(err) {
+            console.error(err);
+            setLoading(false);
+        });
+    }, [balancePassId]);
+
+    function toggleFaction(key) {
+        setExpanded(function(prev) {
+            var next = Object.assign({}, prev);
+            next[key] = !prev[key];
+            return next;
+        });
+    }
+
+    if (loading) return <div className="loading"><div className="spinner"></div>Loading balance pass...</div>;
+    if (!data) return <div className="loading">Balance pass not found</div>;
+
+    var changes = data.changes;
+
+    return (
+        <div className="detail-view">
+            <button className="back-btn" onClick={onBack}>{'\u2190'} Back</button>
+            <div className="detail-header">
+                <h2>{data.title}</h2>
+                <div className="event-meta">
+                    {data.date}
+                    {data.source_url ? (
+                        <span> {'\u00b7'} <a href={data.source_url} target="_blank" rel="noopener noreferrer" className="bp-source-link">Source</a></span>
+                    ) : null}
+                    {data.pdf_url ? (
+                        <span> {'\u00b7'} <a href={data.pdf_url} target="_blank" rel="noopener noreferrer" className="bp-source-link">PDF</a></span>
+                    ) : null}
+                </div>
+            </div>
+
+            {data.summary && (
+                <div className="bp-summary">{data.summary}</div>
+            )}
+
+            {changes && changes.core_rules && changes.core_rules.length > 0 && (
+                <div className="bp-section">
+                    <div className="section-title">Core Rules Changes</div>
+                    <div className="bp-core-rules">
+                        {changes.core_rules.map(function(rule, i) {
+                            return <div key={i} className="bp-core-rule">{'\u2022'} {rule}</div>;
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {changes && changes.faction_changes && changes.faction_changes.length > 0 && (
+                <div className="bp-section">
+                    <div className="section-title">Faction Changes ({changes.faction_changes.length})</div>
+                    <div className="bp-faction-list">
+                        {changes.faction_changes.map(function(fc) {
+                            var ds = DIRECTION_STYLES[fc.direction] || DIRECTION_STYLES.mixed;
+                            var isOpen = expanded[fc.faction];
+                            var hasDetails = (fc.points_changes && fc.points_changes.length > 0) ||
+                                (fc.rules_changes && fc.rules_changes.length > 0) ||
+                                (fc.new_detachments && fc.new_detachments.length > 0);
+
+                            return (
+                                <div key={fc.faction} className="bp-faction-card" style={{borderLeftColor: ds.color}}>
+                                    <div className="bp-faction-header" onClick={function() { if (hasDetails) toggleFaction(fc.faction); }}>
+                                        <span className="bp-direction-badge" style={{background: ds.bg, color: ds.color}}>{ds.label}</span>
+                                        <FactionIcon name={fc.faction} />
+                                        <span className="bp-faction-name">{fc.faction}</span>
+                                        <span className="bp-faction-summary">{fc.summary}</span>
+                                        {hasDetails && <span className={'fc-chevron' + (isOpen ? ' open' : '')}>{'\u25b6'}</span>}
+                                    </div>
+                                    {isOpen && hasDetails && (
+                                        <div className="bp-faction-body">
+                                            {fc.points_changes && fc.points_changes.length > 0 && (
+                                                <div className="bp-changes-group">
+                                                    <div className="bp-changes-title">Points Changes</div>
+                                                    {fc.points_changes.map(function(pc, i) {
+                                                        var changeClass = pc.change > 0 ? 'bp-pts-up' : pc.change < 0 ? 'bp-pts-down' : '';
+                                                        var changeStr = pc.change > 0 ? '+' + pc.change : '' + pc.change;
+                                                        return (
+                                                            <div key={i} className="bp-pts-row">
+                                                                <span className="bp-pts-unit">{pc.unit}</span>
+                                                                {pc.old_points != null && pc.new_points != null && (
+                                                                    <span className="bp-pts-range">{pc.old_points} {'\u2192'} {pc.new_points}</span>
+                                                                )}
+                                                                <span className={'bp-pts-change ' + changeClass}>{changeStr}pts</span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                            {fc.rules_changes && fc.rules_changes.length > 0 && (
+                                                <div className="bp-changes-group">
+                                                    <div className="bp-changes-title">Rules Changes</div>
+                                                    {fc.rules_changes.map(function(rc, i) {
+                                                        return <div key={i} className="bp-rule-item">{'\u2022'} {rc}</div>;
+                                                    })}
+                                                </div>
+                                            )}
+                                            {fc.new_detachments && fc.new_detachments.length > 0 && (
+                                                <div className="bp-changes-group">
+                                                    <div className="bp-changes-title">New Detachments</div>
+                                                    {fc.new_detachments.map(function(det, i) {
+                                                        return <div key={i} className="bp-detachment-item">{'\u2726'} {det}</div>;
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {!changes && (
+                <div className="bp-no-details">Detailed changes not yet available for this balance pass.</div>
+            )}
+        </div>
+    );
+}
+
+// ── Analytics Page ───────────────────────────────────────────────
+
+var TREND_COLORS = [
+    '#e05555', '#4a9a6e', '#4a6fa5', '#c9a84c', '#8b6fb0',
+    '#e0884a', '#4aafaf', '#c75454', '#5a8f7a', '#d4883e',
+];
+
+function AnalyticsOverviewCards(props) {
+    var data = props.data;
+    if (!data) return null;
+
+    var cards = [
+        { label: 'Events', value: data.total_events, icon: '\u2694' },
+        { label: 'Players', value: data.total_unique_players, icon: '\u2302' },
+        { label: 'Placements', value: data.total_placements, icon: '\u25ce' },
+        { label: 'Epochs', value: data.epochs_covered, icon: '\u25c6' },
+    ];
+
+    return (
+        <div className="analytics-overview-cards">
+            {cards.map(function(card) {
+                return (
+                    <div key={card.label} className="analytics-stat-card">
+                        <span className="analytics-stat-icon">{card.icon}</span>
+                        <span className="analytics-stat-value">{card.value}</span>
+                        <span className="analytics-stat-label">{card.label}</span>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function FactionTrendsChart(props) {
+    var trends = props.trends;
+    var metric = props.metric || 'meta_share';
+    var label = props.label || 'Meta Share %';
+    var onSelectFaction = props.onSelectFaction;
+    var chartRef = React.useRef(null);
+    var chartInstance = React.useRef(null);
+
+    React.useEffect(function() {
+        if (!chartRef.current || !trends || !trends.epochs || trends.epochs.length === 0) return;
+
+        if (chartInstance.current) {
+            chartInstance.current.destroy();
+        }
+
+        var labels = trends.epochs.map(function(e) { return e.label; });
+
+        var datasets = trends.factions.map(function(f, i) {
+            return {
+                label: f.faction,
+                data: f.data_points.map(function(dp) { return dp[metric]; }),
+                borderColor: TREND_COLORS[i % TREND_COLORS.length],
+                backgroundColor: TREND_COLORS[i % TREND_COLORS.length] + '22',
+                borderWidth: 2,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                tension: 0.3,
+                fill: false,
+            };
+        });
+
+        var bpLines = trends.balance_passes || [];
+
+        var ctx = chartRef.current.getContext('2d');
+        chartInstance.current = new Chart(ctx, {
+            type: 'line',
+            data: { labels: labels, datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                onClick: function(evt, elements) {
+                    if (elements.length > 0 && onSelectFaction) {
+                        var dsIdx = elements[0].datasetIndex;
+                        var faction = trends.factions[dsIdx].faction;
+                        onSelectFaction(faction);
+                    }
+                },
+                onHover: function(evt, elements) {
+                    evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+                },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: '#c8cad0', font: { size: 11 }, boxWidth: 12 }
+                    },
+                    tooltip: {
+                        backgroundColor: '#1c1d2b',
+                        titleColor: '#c9a84c',
+                        bodyColor: '#c8cad0',
+                        borderColor: '#2e3048',
+                        borderWidth: 1,
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: '#2e3048' },
+                        ticks: { color: '#7a7d8a', font: { size: 11 } },
+                    },
+                    y: {
+                        grid: { color: '#2e3048' },
+                        ticks: { color: '#7a7d8a', font: { size: 11 } },
+                        title: { display: true, text: label, color: '#7a7d8a', font: { size: 11 } },
+                    }
+                }
+            },
+            plugins: [{
+                id: 'balancePassLines',
+                afterDraw: function(chart) {
+                    if (!bpLines || bpLines.length === 0) return;
+                    var xScale = chart.scales.x;
+                    var yScale = chart.scales.y;
+                    var ctx2 = chart.ctx;
+                    // Map balance pass dates to epoch indices
+                    bpLines.forEach(function(bp) {
+                        // Find the epoch index closest to this balance pass date
+                        var epochIdx = -1;
+                        for (var ei = 0; ei < trends.epochs.length; ei++) {
+                            if (trends.epochs[ei].start_date <= bp.date) {
+                                epochIdx = ei;
+                            }
+                        }
+                        if (epochIdx < 0) return;
+                        var x = xScale.getPixelForValue(epochIdx);
+                        ctx2.save();
+                        ctx2.beginPath();
+                        ctx2.setLineDash([4, 4]);
+                        ctx2.strokeStyle = '#c9a84c';
+                        ctx2.lineWidth = 1;
+                        ctx2.moveTo(x, yScale.top);
+                        ctx2.lineTo(x, yScale.bottom);
+                        ctx2.stroke();
+                        ctx2.restore();
+                        // Label
+                        ctx2.save();
+                        ctx2.fillStyle = '#c9a84c';
+                        ctx2.font = '9px sans-serif';
+                        ctx2.textAlign = 'center';
+                        ctx2.fillText(bp.title.split(' ').slice(-2).join(' '), x, yScale.top - 4);
+                        ctx2.restore();
+                    });
+                }
+            }]
+        });
+
+        return function() {
+            if (chartInstance.current) chartInstance.current.destroy();
+        };
+    }, [trends, metric]);
+
+    if (!trends || !trends.epochs || trends.epochs.length === 0) {
+        return <div className="cal-no-events">No trend data available</div>;
+    }
+
+    return (
+        <div className="analytics-chart-container" style={{ height: '400px' }}>
+            <canvas ref={chartRef}></canvas>
+        </div>
+    );
+}
+
+function TopPlayersTable(props) {
+    var players = props.players;
+    var onSelectEvent = props.onSelectEvent;
+    var expandRef = React.useState(null);
+    var expandedPlayer = expandRef[0]; var setExpandedPlayer = expandRef[1];
+
+    if (!players || players.length === 0) {
+        return <div className="cal-no-events">No player data available</div>;
+    }
+
+    return (
+        <div className="top-players-table">
+            <div className="tp-header-row">
+                <span className="tp-col-rank">#</span>
+                <span className="tp-col-name">Player</span>
+                <span className="tp-col-stat">Events</span>
+                <span className="tp-col-stat">Wins</span>
+                <span className="tp-col-stat">Top 4</span>
+                <span className="tp-col-faction">Faction</span>
+            </div>
+            {players.map(function(p, i) {
+                var isExpanded = expandedPlayer === i;
+                return (
+                    <div key={i}>
+                        <div className={'tp-row' + (isExpanded ? ' expanded' : '')} onClick={function() { setExpandedPlayer(isExpanded ? null : i); }}>
+                            <span className="tp-col-rank">{i + 1}</span>
+                            <span className="tp-col-name">{p.name}</span>
+                            <span className="tp-col-stat">{p.total_events}</span>
+                            <span className="tp-col-stat tp-wins">{p.total_wins}</span>
+                            <span className="tp-col-stat">{p.total_top4}</span>
+                            <span className="tp-col-faction"><FactionIcon name={p.primary_faction} />{p.primary_faction}</span>
+                        </div>
+                        {isExpanded && p.recent_results && p.recent_results.length > 0 && (
+                            <div className="tp-recent-results">
+                                {p.recent_results.map(function(r, j) {
+                                    return (
+                                        <div key={j} className="tp-recent-row">
+                                            <span className={'rank-cell ' + (r.rank <= 3 ? 'rank-' + r.rank : '')}>#{r.rank}</span>
+                                            <span className="tp-recent-event" onClick={function(e) { e.stopPropagation(); if (onSelectEvent) onSelectEvent(r.event_id); }}>{r.event_name}</span>
+                                            <span className="tp-recent-date">{r.event_date}</span>
+                                            <span className="tp-recent-faction"><FactionIcon name={r.faction} />{r.faction}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+var UNIT_BAR_COLORS = [
+    '#c9a84c', '#e0884a', '#4a9a6e', '#4a6fa5', '#c75454',
+    '#9b6fb0', '#5aafb8', '#d4765f', '#7bad4e', '#b0896e',
+];
+
+function TopUnitsChart(props) {
+    var data = props.data;
+    var onSelectFaction = props.onSelectFaction;
+
+    var ref1 = React.useState('all'); var viewMode = ref1[0]; var setViewMode = ref1[1];
+
+    if (!data) return null;
+
+    var maxBar = 0;
+    var units = viewMode === 'all' ? data.top_units : [];
+    var factionBreakdown = null;
+
+    if (viewMode !== 'all') {
+        factionBreakdown = data.faction_breakdowns.find(function(fb) { return fb.faction === viewMode; });
+        if (factionBreakdown) units = factionBreakdown.top_units;
+    }
+
+    if (units.length > 0) {
+        maxBar = units[0].lists_containing;
+    }
+
+    return (
+        <div className="units-chart">
+            <div className="units-chart-header">
+                <span className="units-chart-title">Most Used Units</span>
+                <span className="units-chart-subtitle">{data.total_lists_analysed} army lists analysed</span>
+            </div>
+            <div className="units-filter-row">
+                <button className={'units-filter-btn' + (viewMode === 'all' ? ' active' : '')}
+                    onClick={function() { setViewMode('all'); }}>All Factions</button>
+                {data.faction_breakdowns.map(function(fb) {
+                    return <button key={fb.faction}
+                        className={'units-filter-btn' + (viewMode === fb.faction ? ' active' : '')}
+                        onClick={function() { setViewMode(fb.faction); }}>
+                        <FactionIcon name={fb.faction} size={14} />{fb.faction}
+                    </button>;
+                })}
+            </div>
+            <div className="units-bar-list">
+                {units.map(function(u, i) {
+                    var pct = maxBar > 0 ? (u.lists_containing / maxBar) * 100 : 0;
+                    var color = UNIT_BAR_COLORS[i % UNIT_BAR_COLORS.length];
+                    var keywords = u.keywords.length > 0 ? u.keywords.join(', ') : '';
+                    return (
+                        <div key={u.name} className="unit-bar-row">
+                            <div className="unit-bar-rank">{i + 1}</div>
+                            <div className="unit-bar-info">
+                                <div className="unit-bar-name-row">
+                                    <span className="unit-bar-name">{u.name}</span>
+                                    {keywords && <span className="unit-bar-keywords">{keywords}</span>}
+                                </div>
+                                <div className="unit-bar-track">
+                                    <div className="unit-bar-fill" style={{ width: pct + '%', background: color }}></div>
+                                </div>
+                            </div>
+                            <div className="unit-bar-stats">
+                                <span className="unit-bar-count" title="Appears in this many lists">{u.lists_containing} lists</span>
+                                {u.avg_points ? <span className="unit-bar-pts" title="Average points cost">{u.avg_points}pts</span> : null}
+                                <span className="unit-bar-avg" title="Avg models per list">{'\u00d7'}{u.avg_count_per_list}</span>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+function AnalyticsPage(props) {
+    var onSelectFaction = props.onSelectFaction;
+    var onSelectEvent = props.onSelectEvent;
+
+    var ref1 = React.useState('trends'); var subTab = ref1[0]; var setSubTab = ref1[1];
+    var ref2 = React.useState(null); var overview = ref2[0]; var setOverview = ref2[1];
+    var ref3 = React.useState(null); var trends = ref3[0]; var setTrends = ref3[1];
+    var ref4 = React.useState(null); var players = ref4[0]; var setPlayers = ref4[1];
+    var ref5 = React.useState(true); var loading = ref5[0]; var setLoading = ref5[1];
+    var ref6 = React.useState(null); var unitsData = ref6[0]; var setUnitsData = ref6[1];
+
+    React.useEffect(function() {
+        setLoading(true);
+        Promise.all([
+            Api.getAnalyticsOverview(),
+            Api.getAnalyticsTrends(),
+            Api.getAnalyticsPlayers(null, 25),
+            Api.getAnalyticsUnits(null, null, 30),
+        ]).then(function(results) {
+            setOverview(results[0]);
+            setTrends(results[1]);
+            setPlayers(results[2]);
+            setUnitsData(results[3]);
+            setLoading(false);
+        }).catch(function(err) {
+            console.error('Analytics load error:', err);
+            setLoading(false);
+        });
+    }, []);
+
+    if (loading) {
+        return <div className="loading"><div className="spinner"></div>Loading analytics...</div>;
+    }
+
+    return (
+        <div className="analytics-page">
+            <AnalyticsOverviewCards data={overview} />
+
+            <div className="chart-tabs" style={{ marginTop: '16px' }}>
+                <button className={'chart-tab' + (subTab === 'trends' ? ' active' : '')} onClick={function() { setSubTab('trends'); }}>Meta Trends</button>
+                <button className={'chart-tab' + (subTab === 'winrates' ? ' active' : '')} onClick={function() { setSubTab('winrates'); }}>Win Rates</button>
+                <button className={'chart-tab' + (subTab === 'units' ? ' active' : '')} onClick={function() { setSubTab('units'); }}>Top Units</button>
+                <button className={'chart-tab' + (subTab === 'players' ? ' active' : '')} onClick={function() { setSubTab('players'); }}>Top Players</button>
+            </div>
+
+            {subTab === 'trends' && (
+                <FactionTrendsChart trends={trends} metric="meta_share" label="Meta Share %" onSelectFaction={onSelectFaction} />
+            )}
+            {subTab === 'winrates' && (
+                <FactionTrendsChart trends={trends} metric="win_rate" label="Win Rate %" onSelectFaction={onSelectFaction} />
+            )}
+            {subTab === 'units' && (
+                <TopUnitsChart data={unitsData} onSelectFaction={onSelectFaction} />
+            )}
+            {subTab === 'players' && (
+                <TopPlayersTable players={players ? players.players : null} onSelectEvent={onSelectEvent} />
+            )}
         </div>
     );
 }
@@ -908,11 +1768,15 @@ function App() {
     var ref12 = React.useState(null); var dateMax = ref12[0]; var setDateMax = ref12[1];
     var ref13 = React.useState('All'); var allegianceFilter = ref13[0]; var setAllegianceFilter = ref13[1];
     var debounceRef = React.useRef(null);
+    var ref14 = React.useState('tournaments'); var mainTab = ref14[0]; var setMainTab = ref14[1];
+    var ref15 = React.useState([]); var calendarEvents = ref15[0]; var setCalendarEvents = ref15[1];
+    var ref16 = React.useState([]); var balancePasses = ref16[0]; var setBalancePasses = ref16[1];
+    var ref17 = React.useState(null); var selectedBalancePass = ref17[0]; var setSelectedBalancePass = ref17[1];
 
     function loadData(epoch, from, to) {
         return Promise.all([
             Api.getFactionStats(epoch, from, to),
-            Api.getEvents(1, 20, epoch, from, to),
+            Api.getEvents(1, 20, epoch, from, to, true),
         ]).then(function(results) {
             setFactions(results[0].factions);
             setEvents(results[1].events);
@@ -937,29 +1801,49 @@ function App() {
     }
 
     React.useEffect(function() {
-        Promise.all([
-            Api.getEpochs(),
-            Api.getFactionStats(),
-            Api.getEvents(1, 20),
-        ]).then(function(results) {
-            var epochList = results[0].epochs;
+        Api.getEpochs().then(function(epochData) {
+            var epochList = epochData.epochs;
             setEpochs(epochList);
+            // Default to the most recent epoch with data; fall back to current
             var current = epochList.find(function(e) { return e.is_current; });
-            if (current) setActiveEpoch(current.id);
-            setFactions(results[1].factions);
-            setEvents(results[2].events);
-            setPagination(results[2].pagination);
-            // Set initial date range
-            if (results[2].events.length > 0) {
-                var dates = results[2].events.map(function(e) { return e.date; }).sort();
-                var minD = current && current.start_date ? current.start_date : dates[0];
-                var maxD = new Date().toISOString().slice(0, 10);
-                setDateMin(minD);
-                setDateMax(maxD);
-                setDateFrom(minD);
-                setDateTo(maxD);
+            var defaultEpoch = current;
+            if (current && current.event_count === 0) {
+                var withData = epochList.filter(function(e) { return e.event_count > 0; });
+                if (withData.length > 0) {
+                    defaultEpoch = withData[withData.length - 1];
+                }
             }
-            setLoading(false);
+            var epochId = defaultEpoch ? defaultEpoch.id : null;
+            if (epochId) setActiveEpoch(epochId);
+
+            return Promise.all([
+                Api.getFactionStats(epochId),
+                Api.getEvents(1, 20, epochId, null, null, true),
+            ]).then(function(results) {
+                setFactions(results[0].factions);
+                setEvents(results[1].events);
+                setPagination(results[1].pagination);
+                // Set initial date range
+                if (results[1].events.length > 0) {
+                    var dates = results[1].events.map(function(e) { return e.date; }).sort();
+                    var minD = defaultEpoch && defaultEpoch.start_date ? defaultEpoch.start_date : dates[0];
+                    var maxD = new Date().toISOString().slice(0, 10);
+                    setDateMin(minD);
+                    setDateMax(maxD);
+                    setDateFrom(minD);
+                    setDateTo(maxD);
+                }
+                setLoading(false);
+
+                // Load calendar/balance data separately so failures don't block the main UI
+                Api.getBalancePasses().then(function(bp) {
+                    setBalancePasses(bp.balance_passes || []);
+                }).catch(function(e) { console.warn('Balance passes not available:', e); });
+
+                Api.getEvents(1, 200, epochId).then(function(calData) {
+                    setCalendarEvents(calData.events || []);
+                }).catch(function(e) { console.warn('Calendar events not available:', e); });
+            });
         }).catch(function(err) {
             console.error('Failed to load data:', err);
             setLoading(false);
@@ -970,6 +1854,7 @@ function App() {
         setActiveEpoch(epochId);
         setSelectedEvent(null);
         setSelectedFaction(null);
+        setSelectedBalancePass(null);
         setDateFrom(null);
         setDateTo(null);
         setDateMin(null);
@@ -977,6 +1862,9 @@ function App() {
         loadData(epochId).catch(function(err) {
             console.error('Failed to load epoch data:', err);
         });
+        Api.getEvents(1, 200, epochId).then(function(calData) {
+            setCalendarEvents(calData.events || []);
+        }).catch(function(e) { console.warn('Calendar events reload failed:', e); });
     }
 
     function handleDateRangeChange(from, to) {
@@ -987,7 +1875,7 @@ function App() {
         debounceRef.current = setTimeout(function() {
             Promise.all([
                 Api.getFactionStats(activeEpoch, from, to),
-                Api.getEvents(1, 20, activeEpoch, from, to),
+                Api.getEvents(1, 20, activeEpoch, from, to, true),
             ]).then(function(results) {
                 setFactions(results[0].factions);
                 setEvents(results[1].events);
@@ -997,7 +1885,7 @@ function App() {
     }
 
     function handlePageChange(newPage) {
-        Api.getEvents(newPage, 20, activeEpoch, dateFrom, dateTo).then(function(data) {
+        Api.getEvents(newPage, 20, activeEpoch, dateFrom, dateTo, true).then(function(data) {
             setEvents(data.events);
             setPagination(data.pagination);
         });
@@ -1006,16 +1894,25 @@ function App() {
     function handleSelectEvent(id) {
         setSelectedEvent(id);
         setSelectedFaction(null);
+        setSelectedBalancePass(null);
     }
 
     function handleSelectFaction(name) {
         setSelectedFaction(name);
         setSelectedEvent(null);
+        setSelectedBalancePass(null);
+    }
+
+    function handleSelectBalancePass(id) {
+        setSelectedBalancePass(id);
+        setSelectedEvent(null);
+        setSelectedFaction(null);
     }
 
     function handleBack() {
         setSelectedEvent(null);
         setSelectedFaction(null);
+        setSelectedBalancePass(null);
     }
 
     if (loading) {
@@ -1034,11 +1931,29 @@ function App() {
         mainContent = <EventDetail eventId={selectedEvent} onBack={handleBack} activeEpoch={activeEpoch} />;
     } else if (selectedFaction) {
         mainContent = <FactionDetail factionName={selectedFaction} onBack={handleBack} onSelectEvent={handleSelectEvent} activeEpoch={activeEpoch} />;
+    } else if (selectedBalancePass) {
+        mainContent = <BalancePassDetail balancePassId={selectedBalancePass} onBack={handleBack} />;
     } else {
         mainContent = (
             <div>
-                <h2>Recent Tournaments</h2>
-                <EventList events={events} pagination={pagination} onPageChange={handlePageChange} onSelectEvent={handleSelectEvent} />
+                <div className="main-tabs">
+                    <button className={'main-tab' + (mainTab === 'tournaments' ? ' active' : '')} onClick={function() { setMainTab('tournaments'); }}>Tournaments</button>
+                    <button className={'main-tab' + (mainTab === 'calendar' ? ' active' : '')} onClick={function() { setMainTab('calendar'); }}>Calendar</button>
+                    <button className={'main-tab' + (mainTab === 'balance' ? ' active' : '')} onClick={function() { setMainTab('balance'); }}>Balance Passes</button>
+                    <button className={'main-tab' + (mainTab === 'analytics' ? ' active' : '')} onClick={function() { setMainTab('analytics'); }}>Analytics</button>
+                </div>
+                {mainTab === 'tournaments' && (
+                    <EventList events={events} pagination={pagination} onPageChange={handlePageChange} onSelectEvent={handleSelectEvent} />
+                )}
+                {mainTab === 'calendar' && (
+                    <CalendarView allEvents={calendarEvents} balancePasses={balancePasses} onSelectEvent={handleSelectEvent} onSelectBalancePass={handleSelectBalancePass} />
+                )}
+                {mainTab === 'balance' && (
+                    <BalancePassList balancePasses={balancePasses} onSelectBalancePass={handleSelectBalancePass} />
+                )}
+                {mainTab === 'analytics' && (
+                    <AnalyticsPage onSelectFaction={handleSelectFaction} onSelectEvent={handleSelectEvent} />
+                )}
             </div>
         );
     }
@@ -1050,7 +1965,7 @@ function App() {
             <div className="header">
                 <h1>40K META TRACKER</h1>
                 <div className="epoch-timeline">
-                    {epochs.filter(function(epoch) { return epoch.event_count > 0; }).map(function(epoch, i, arr) {
+                    {epochs.filter(function(epoch) { return epoch.event_count > 0 || epoch.is_current; }).map(function(epoch, i, arr) {
                         var isActive = epoch.id === activeEpoch;
                         var color = CHEVRON_COLORS[i % CHEVRON_COLORS.length];
                         var isFirst = i === 0;
@@ -1068,6 +1983,9 @@ function App() {
                                 onClick={function() { handleEpochChange(epoch.id); }}>
                                 <span className="chevron-label">{epoch.label}</span>
                                 <span className="chevron-meta">{epoch.event_count} events</span>
+                                {epoch.balance_pass_id && (
+                                    <span className="chevron-bp-btn" title="View balance pass details" onClick={function(e) { e.stopPropagation(); handleSelectBalancePass(epoch.balance_pass_id); }}>{'\u25c6'} Changes</span>
+                                )}
                             </div>
                         );
                     })}

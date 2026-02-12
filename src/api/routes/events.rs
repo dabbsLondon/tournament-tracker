@@ -165,6 +165,7 @@ pub struct ListEventsParams {
     pub from: Option<String>,
     pub to: Option<String>,
     pub epoch: Option<String>,
+    pub has_results: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -184,6 +185,8 @@ pub struct EventSummary {
     pub round_count: Option<u32>,
     pub source_url: String,
     pub winner: Option<WinnerSummary>,
+    pub has_lists: bool,
+    pub completed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -227,6 +230,25 @@ pub async fn list_events(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let placements = dedup_by_id(placements, |p| p.id.as_str());
 
+    let today = chrono::Utc::now().date_naive();
+    let event_ids_with_placements: std::collections::HashSet<&str> =
+        placements.iter().map(|p| p.event_id.as_str()).collect();
+
+    // Filter to only events that have at least one placement (results)
+    // Also exclude future events — they can't have legitimate results
+    if params.has_results.unwrap_or(false) {
+        events.retain(|e| {
+            event_ids_with_placements.contains(e.id.as_str()) && e.date <= today
+        });
+    }
+
+    // Read army lists to determine which events have lists
+    let list_reader =
+        JsonlReader::<ArmyList>::for_entity(&state.storage, EntityType::ArmyList, &epoch);
+    let lists = list_reader.read_all().unwrap_or_default();
+    let urls_with_lists: std::collections::HashSet<&str> =
+        lists.iter().filter_map(|l| l.source_url.as_deref()).collect();
+
     let pagination = Pagination::new(params.page, params.page_size);
     let total_items = events.len() as u32;
     let meta = PaginationMeta::new(&pagination, total_items);
@@ -251,6 +273,9 @@ pub async fn list_events(
                     detachment: p.detachment.clone(),
                 });
 
+            let completed = event.date <= today
+                && event_ids_with_placements.contains(event.id.as_str());
+
             EventSummary {
                 id: event.id.as_str().to_string(),
                 name: event.name.clone(),
@@ -260,6 +285,8 @@ pub async fn list_events(
                 round_count: event.round_count,
                 source_url: event.source_url.clone(),
                 winner,
+                has_lists: urls_with_lists.contains(event.source_url.as_str()),
+                completed,
             }
         })
         .collect();

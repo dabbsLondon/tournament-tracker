@@ -31,7 +31,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/meta/factions", get(routes::meta::faction_stats))
         .route("/api/meta/factions/:name", get(routes::meta::faction_detail))
         .route("/api/meta/allegiances", get(routes::meta::allegiance_stats))
-        .route("/api/epochs", get(routes::epochs::list_epochs));
+        .route("/api/epochs", get(routes::epochs::list_epochs))
+        .route("/api/balance", get(routes::epochs::list_balance_passes))
+        .route("/api/balance/:id", get(routes::epochs::get_balance_pass))
+        .route("/api/analytics/overview", get(routes::analytics::overview))
+        .route("/api/analytics/trends", get(routes::analytics::faction_trends))
+        .route("/api/analytics/players", get(routes::analytics::top_players))
+        .route("/api/analytics/units", get(routes::analytics::top_units));
 
     Router::new()
         .merge(api)

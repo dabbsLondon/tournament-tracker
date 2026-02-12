@@ -301,101 +301,79 @@ pub async fn faction_detail(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let all_lists = dedup_by_id(all_lists, |l| l.id.as_str());
 
-    let mut winners: Vec<FactionWinner> = faction_placements
-        .into_iter()
-        .map(|p| {
-            let event = events.iter().find(|e| e.id == p.event_id);
-            let event_name = event.map(|e| e.name.clone()).unwrap_or_default();
-            let event_date = event.map(|e| e.date.to_string()).unwrap_or_default();
-            let source_url = event.map(|e| e.source_url.as_str()).unwrap_or("");
+    let normalize_name = |s: &str| -> String {
+        s.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    };
 
-            // Match army list by player name within same source article,
-            // then broaden to all lists of the same faction in the epoch
-            let event_lists: Vec<_> = all_lists.iter()
-                .filter(|l| l.source_url.as_deref() == Some(source_url))
-                .collect();
+    // Track which list IDs have been claimed to prevent double-matching
+    let mut claimed_list_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-            let normalize_name = |s: &str| {
-                s.split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .to_lowercase()
-            };
+    let mut winners: Vec<FactionWinner> = Vec::new();
+    for p in faction_placements {
+        let event = events.iter().find(|e| e.id == p.event_id);
+        let event_name = event.map(|e| e.name.clone()).unwrap_or_default();
+        let event_date = event.map(|e| e.date.to_string()).unwrap_or_default();
+        let source_url = event.map(|e| e.source_url.as_str()).unwrap_or("");
 
-            // Try matching army list to this placement using multiple strategies
-            let pname = normalize_name(&p.player_name);
+        let event_lists: Vec<_> = all_lists.iter()
+            .filter(|l| {
+                l.source_url.as_deref() == Some(source_url)
+                    && !claimed_list_ids.contains(l.id.as_str())
+            })
+            .collect();
 
-            // 1. Player name match within same source article
-            let mut matched_list: Option<&ArmyList> = event_lists.iter()
+        let pname = normalize_name(&p.player_name);
+
+        // 1. Player name match within same source article
+        let mut matched_list: Option<&ArmyList> = event_lists.iter()
+            .find(|l| {
+                l.player_name.as_ref().is_some_and(|name| pname == normalize_name(name))
+            })
+            .copied();
+
+        // 2. Player name + faction match across all unclaimed lists
+        if matched_list.is_none() {
+            matched_list = all_lists.iter()
                 .find(|l| {
-                    l.player_name.as_ref().is_some_and(|name| pname == normalize_name(name))
-                })
-                .copied();
-
-            // 2. Player name + faction match across all lists
-            if matched_list.is_none() {
-                matched_list = all_lists.iter()
-                    .find(|l| {
-                        l.player_name.as_ref().is_some_and(|name| {
+                    !claimed_list_ids.contains(l.id.as_str())
+                        && l.player_name.as_ref().is_some_and(|name| {
                             pname == normalize_name(name)
                                 && normalize_faction_name(&l.faction).eq_ignore_ascii_case(&normalized_query)
                         })
-                    });
-            }
+                });
+        }
 
-            // 3. Sole faction match within event
-            if matched_list.is_none() {
-                let faction_matches: Vec<_> = event_lists.iter()
-                    .filter(|l| normalize_faction_name(&l.faction).eq_ignore_ascii_case(&normalized_query))
-                    .collect();
-                if faction_matches.len() == 1 {
-                    matched_list = Some(faction_matches[0]);
-                }
-            }
+        // Only match by player name — anonymous lists stay unlinked
 
-            // 4. Sole faction match across all lists
-            if matched_list.is_none() {
-                let faction_matches: Vec<_> = all_lists.iter()
-                    .filter(|l| {
-                        normalize_faction_name(&l.faction).eq_ignore_ascii_case(&normalized_query)
-                            && !l.units.is_empty()
-                    })
-                    .collect();
-                if faction_matches.len() == 1 {
-                    matched_list = Some(faction_matches[0]);
-                }
-            }
+        if let Some(list) = matched_list {
+            claimed_list_ids.insert(list.id.as_str().to_string());
+        }
+        let army_list = matched_list.map(|l| army_list_to_detail(l));
 
-            let army_list = matched_list.map(|l| army_list_to_detail(l));
-
-            FactionWinner {
-                rank: p.rank,
-                player_name: p.player_name,
-                detachment: p.detachment,
-                event_name,
-                event_id: p.event_id.as_str().to_string(),
-                event_date,
-                army_list,
-            }
-        })
-        .collect();
+        winners.push(FactionWinner {
+            rank: p.rank,
+            player_name: p.player_name,
+            detachment: p.detachment,
+            event_name,
+            event_id: p.event_id.as_str().to_string(),
+            event_date,
+            army_list,
+        });
+    }
 
     // Sort by rank then date descending
     winners.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| b.event_date.cmp(&a.event_date)));
 
-    // Collect IDs of lists that were matched to placements
-    let matched_list_ids: std::collections::HashSet<String> = winners
-        .iter()
-        .filter_map(|w| w.army_list.as_ref().map(|al| al.id.clone()))
-        .collect();
-
-    // Find unmatched lists for this faction
+    // Find unmatched lists for this faction (using the claimed_list_ids from matching above)
     let faction_lists: Vec<_> = all_lists
         .iter()
         .filter(|l| {
             normalize_faction_name(&l.faction).eq_ignore_ascii_case(&normalized_query)
                 && !l.units.is_empty()
-                && !matched_list_ids.contains(l.id.as_str())
+                && !claimed_list_ids.contains(l.id.as_str())
         })
         .collect();
 
@@ -567,4 +545,272 @@ pub async fn allegiance_stats(
         allegiances,
         total_placements: total,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::api::build_router;
+    use crate::api::state::AppState;
+    use crate::models::{ArmyList, Event, Placement, Unit};
+    use crate::models::EpochMapper;
+    use crate::storage::StorageConfig;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use serde_json::Value;
+    use std::sync::Arc;
+    use tower::util::ServiceExt;
+
+    /// Create a test AppState with data written to a temp directory.
+    fn setup_test_state(dir: &std::path::Path) -> AppState {
+        let storage = StorageConfig::new(dir.to_path_buf());
+        // Create epoch directory
+        let epoch_dir = dir.join("normalized").join("current");
+        std::fs::create_dir_all(&epoch_dir).unwrap();
+        AppState {
+            storage: Arc::new(storage),
+            epoch_mapper: Arc::new(EpochMapper::new()),
+        }
+    }
+
+    fn write_jsonl<T: serde::Serialize>(path: &std::path::Path, items: &[T]) {
+        let mut content = String::new();
+        for item in items {
+            content.push_str(&serde_json::to_string(item).unwrap());
+            content.push('\n');
+        }
+        std::fs::write(path, content).unwrap();
+    }
+
+    fn make_event(name: &str, date: &str, source_url: &str) -> Event {
+        Event::new(
+            name.to_string(),
+            chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap(),
+            source_url.to_string(),
+            "test".to_string(),
+            "current".into(),
+        )
+    }
+
+    fn make_placement(event: &Event, rank: u32, player: &str, faction: &str) -> Placement {
+        Placement::new(
+            event.id.clone(),
+            "current".into(),
+            rank,
+            player.to_string(),
+            faction.to_string(),
+        )
+    }
+
+    fn make_list(faction: &str, detachment: &str, player: Option<&str>, source_url: Option<&str>) -> ArmyList {
+        let unit = Unit::new("Test Unit".to_string(), 1).with_points(100);
+        let mut list = ArmyList::new(
+            faction.to_string(),
+            2000,
+            vec![unit],
+            "raw text".to_string(),
+        )
+        .with_detachment(detachment.to_string());
+        if let Some(name) = player {
+            list = list.with_player_name(name.to_string());
+        }
+        if let Some(url) = source_url {
+            list = list.with_source_url(url.to_string());
+        }
+        list
+    }
+
+    async fn get_json(app: axum::Router, uri: &str) -> (StatusCode, Value) {
+        let resp = app
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        (status, json)
+    }
+
+    // ── Matching Logic Tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_player_name_match_within_same_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
+        let placement = make_placement(&event, 1, "Alice Smith", "Dark Angels");
+        let list = make_list("Dark Angels", "Wrath of the Rock", Some("Alice Smith"), Some("https://example.com/gt-alpha"));
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&placement]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/meta/factions/Dark%20Angels").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["winners"].as_array().unwrap().len(), 1);
+        assert!(json["winners"][0]["army_list"].is_object(), "Should have matched list by player name");
+        assert_eq!(json["unmatched_lists"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_player_name_match_cross_event() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
+        let placement = make_placement(&event, 1, "Bob Jones", "Necrons");
+        // List from a DIFFERENT source URL but same player + faction
+        let list = make_list("Necrons", "Hypercrypt Legion", Some("Bob Jones"), Some("https://other.com/lists"));
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&placement]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/meta/factions/Necrons").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["winners"][0]["army_list"].is_object(), "Should match by player name + faction across events");
+    }
+
+    #[tokio::test]
+    async fn test_anonymous_list_stays_unlinked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
+        let placement = make_placement(&event, 1, "Charlie Brown", "Genestealer Cults");
+        // Anonymous list — no player name, same event source
+        let list = make_list("Genestealer Cults", "Strike Force", None, Some("https://example.com/gt-alpha"));
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&placement]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/meta/factions/Genestealer%20Cults").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["winners"][0]["army_list"].is_null(), "Anonymous list must NOT be matched");
+        assert_eq!(json["unmatched_lists"].as_array().unwrap().len(), 1, "Anonymous list should appear in unmatched");
+    }
+
+    #[tokio::test]
+    async fn test_no_double_matching_same_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
+        let p1 = make_placement(&event, 1, "Dave Wilson", "Dark Angels");
+        let p2 = make_placement(&event, 3, "Eve Taylor", "Dark Angels");
+        // Only ONE Dark Angels list, belonging to Dave
+        let list = make_list("Dark Angels", "Wrath of the Rock", Some("Dave Wilson"), Some("https://example.com/gt-alpha"));
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list]);
+
+        let app = build_router(state);
+        let (_, json) = get_json(app, "/api/meta/factions/Dark%20Angels").await;
+
+        let winners = json["winners"].as_array().unwrap();
+        let dave = winners.iter().find(|w| w["player_name"] == "Dave Wilson").unwrap();
+        let eve = winners.iter().find(|w| w["player_name"] == "Eve Taylor").unwrap();
+
+        assert!(dave["army_list"].is_object(), "Dave should have the list");
+        assert!(eve["army_list"].is_null(), "Eve should NOT get Dave's list");
+        assert_eq!(json["unmatched_lists"].as_array().unwrap().len(), 0, "No unmatched lists — Dave's list was claimed");
+    }
+
+    #[tokio::test]
+    async fn test_wrong_player_name_stays_unlinked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
+        let placement = make_placement(&event, 2, "Frank Miller", "T'au Empire");
+        // List belongs to a different player entirely
+        let list = make_list("T'au Empire", "Kauyon", Some("Grace Hopper"), Some("https://example.com/gt-alpha"));
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&placement]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list]);
+
+        let app = build_router(state);
+        let (_, json) = get_json(app, "/api/meta/factions/T%27au%20Empire").await;
+
+        assert!(json["winners"][0]["army_list"].is_null(), "Should not match list to wrong player");
+        assert_eq!(json["unmatched_lists"].as_array().unwrap().len(), 1, "Grace Hopper's list should be unlinked");
+        assert_eq!(json["unmatched_lists"][0]["player_name"], "Grace Hopper");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_factions_no_cross_contamination() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
+        let p_da = make_placement(&event, 1, "Hank", "Dark Angels");
+        let p_ne = make_placement(&event, 2, "Iris", "Necrons");
+        let list_ne = make_list("Necrons", "Hypercrypt Legion", Some("Iris"), Some("https://example.com/gt-alpha"));
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p_da, &p_ne]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list_ne]);
+
+        let app = build_router(state.clone());
+        let (_, json_da) = get_json(app, "/api/meta/factions/Dark%20Angels").await;
+
+        assert!(json_da["winners"][0]["army_list"].is_null(), "DA should not get Necrons list");
+        assert_eq!(json_da["unmatched_lists"].as_array().unwrap().len(), 0);
+
+        let app2 = build_router(state);
+        let (_, json_ne) = get_json(app2, "/api/meta/factions/Necrons").await;
+        assert!(json_ne["winners"][0]["army_list"].is_object(), "Necrons should get their list");
+    }
+
+    #[tokio::test]
+    async fn test_only_top4_shown_as_winners() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("Big GT", "2026-01-20", "https://example.com/big");
+        let placements: Vec<_> = (1..=8)
+            .map(|rank| make_placement(&event, rank, &format!("Player {}", rank), "Aeldari"))
+            .collect();
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &placements.iter().collect::<Vec<_>>());
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &Vec::<ArmyList>::new());
+
+        let app = build_router(state);
+        let (_, json) = get_json(app, "/api/meta/factions/Aeldari").await;
+
+        assert_eq!(json["winners"].as_array().unwrap().len(), 4, "Only top 4 should be shown");
+    }
+
+    #[tokio::test]
+    async fn test_faction_not_found_returns_404() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &Vec::<Event>::new());
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &Vec::<Placement>::new());
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &Vec::<ArmyList>::new());
+
+        let app = build_router(state);
+        let (status, _) = get_json(app, "/api/meta/factions/Nonexistent").await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
 }

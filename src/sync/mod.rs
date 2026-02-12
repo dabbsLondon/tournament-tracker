@@ -563,6 +563,7 @@ impl SyncOrchestrator {
     /// Process a Goonhammer article given its HTML content.
     ///
     /// Strips HTML to text before sending to AI agents.
+    /// Deduplicates against existing data before storing.
     /// Returns (events_count, placements_count, lists_count).
     async fn process_goonhammer_article_content(
         &self,
@@ -616,6 +617,25 @@ impl SyncOrchestrator {
             );
 
             if !self.config.dry_run {
+                // Dedup: load existing event IDs and skip if already present
+                let existing_events: Vec<crate::models::Event> =
+                    crate::storage::JsonlReader::for_entity(
+                        &self.config.storage,
+                        EntityType::Event,
+                        &epoch_str,
+                    )
+                    .read_all()
+                    .unwrap_or_default();
+                let existing_event_ids: std::collections::HashSet<String> = existing_events
+                    .iter()
+                    .map(|e| e.id.as_str().to_string())
+                    .collect();
+
+                if existing_event_ids.contains(event.id.as_str()) {
+                    info!("  Skipping duplicate event: {} ({})", event.name, event.id);
+                    continue;
+                }
+
                 let event_writer = JsonlWriter::for_entity(
                     &self.config.storage,
                     EntityType::Event,
@@ -642,7 +662,22 @@ impl SyncOrchestrator {
                     let list_count = harvest_output.raw_lists.len() as u32;
                     total_lists += list_count;
 
-                    // 5. Convert placements and store
+                    // 5. Convert placements and store (with dedup)
+                    let existing_placement_ids: std::collections::HashSet<String> = if !self.config.dry_run {
+                        crate::storage::JsonlReader::<crate::models::Placement>::for_entity(
+                            &self.config.storage,
+                            EntityType::Placement,
+                            &epoch_str,
+                        )
+                        .read_all()
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|p| p.id.as_str().to_string())
+                        .collect()
+                    } else {
+                        std::collections::HashSet::new()
+                    };
+
                     for placement_stub in &harvest_output.placements {
                         let placement = convert::placement_from_stub(
                             placement_stub,
@@ -651,6 +686,11 @@ impl SyncOrchestrator {
                         );
 
                         if !self.config.dry_run {
+                            if existing_placement_ids.contains(placement.id.as_str()) {
+                                info!("    Skipping duplicate placement: #{} {}", placement.rank, placement.player_name);
+                                continue;
+                            }
+
                             let placement_writer = JsonlWriter::for_entity(
                                 &self.config.storage,
                                 EntityType::Placement,
@@ -663,7 +703,22 @@ impl SyncOrchestrator {
                         total_placements += 1;
                     }
 
-                    // 6. Normalize and store army lists
+                    // 6. Normalize and store army lists (with dedup)
+                    let existing_list_ids: std::collections::HashSet<String> = if !self.config.dry_run {
+                        crate::storage::JsonlReader::<ArmyList>::for_entity(
+                            &self.config.storage,
+                            EntityType::ArmyList,
+                            &epoch_str,
+                        )
+                        .read_all()
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|l| l.id.as_str().to_string())
+                        .collect()
+                    } else {
+                        std::collections::HashSet::new()
+                    };
+
                     let normalizer = ListNormalizerAgent::new(self.backend.clone());
                     for (list_idx, raw_list) in harvest_output.raw_lists.iter().enumerate() {
                         // Find the matching placement to get the faction
@@ -721,6 +776,11 @@ impl SyncOrchestrator {
                         }
 
                         if !self.config.dry_run {
+                            if existing_list_ids.contains(army_list.id.as_str()) {
+                                info!("    Skipping duplicate army list: {}", army_list.id);
+                                continue;
+                            }
+
                             let list_writer = JsonlWriter::for_entity(
                                 &self.config.storage,
                                 EntityType::ArmyList,

@@ -25,6 +25,41 @@ impl std::fmt::Display for SignificantEventType {
     }
 }
 
+/// A single unit points change within a balance update.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PointsChange {
+    pub unit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_points: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_points: Option<i32>,
+    pub change: i32,
+}
+
+/// Changes to a specific faction in a balance update.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactionChange {
+    pub faction: String,
+    /// "buff", "nerf", "mixed", or "rework"
+    pub direction: String,
+    pub summary: String,
+    #[serde(default)]
+    pub points_changes: Vec<PointsChange>,
+    #[serde(default)]
+    pub rules_changes: Vec<String>,
+    #[serde(default)]
+    pub new_detachments: Vec<String>,
+}
+
+/// Structured details of what changed in a balance update.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BalanceChanges {
+    #[serde(default)]
+    pub core_rules: Vec<String>,
+    #[serde(default)]
+    pub faction_changes: Vec<FactionChange>,
+}
+
 /// A significant event that marks an epoch boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignificantEvent {
@@ -48,6 +83,10 @@ pub struct SignificantEvent {
 
     /// AI-extracted summary of key changes
     pub summary: Option<String>,
+
+    /// Structured balance changes (for balance updates)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changes: Option<BalanceChanges>,
 
     /// When this record was created
     pub created_at: DateTime<Utc>,
@@ -80,6 +119,7 @@ impl SignificantEvent {
             source_url,
             pdf_url: None,
             summary: None,
+            changes: None,
             created_at: Utc::now(),
             extraction_confidence: Confidence::default(),
             needs_review: false,
@@ -200,5 +240,40 @@ mod tests {
         assert_eq!(event.id, deserialized.id);
         assert_eq!(event.event_type, deserialized.event_type);
         assert_eq!(event.title, deserialized.title);
+    }
+
+    #[test]
+    fn test_backward_compat_no_changes_field() {
+        // Old JSON without 'changes' field should deserialize fine
+        let json = r#"{"id":"abc123","event_type":"balance_update","date":"2025-01-20","title":"Test","source_url":"https://example.com","pdf_url":null,"summary":null,"created_at":"2026-01-01T00:00:00Z","extraction_confidence":"high","needs_review":false,"raw_source_path":null}"#;
+        let event: SignificantEvent = serde_json::from_str(json).unwrap();
+        assert!(event.changes.is_none());
+    }
+
+    #[test]
+    fn test_balance_changes_serialization() {
+        let changes = BalanceChanges {
+            core_rules: vec!["Deep Strike distance 3\" to 6\"".to_string()],
+            faction_changes: vec![FactionChange {
+                faction: "Aeldari".to_string(),
+                direction: "nerf".to_string(),
+                summary: "Major points increases".to_string(),
+                points_changes: vec![PointsChange {
+                    unit: "Fire Dragons".to_string(),
+                    old_points: Some(85),
+                    new_points: Some(100),
+                    change: 15,
+                }],
+                rules_changes: vec!["Star Engines reworked".to_string()],
+                new_detachments: vec![],
+            }],
+        };
+
+        let json = serde_json::to_string(&changes).unwrap();
+        let deserialized: BalanceChanges = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.core_rules.len(), 1);
+        assert_eq!(deserialized.faction_changes.len(), 1);
+        assert_eq!(deserialized.faction_changes[0].points_changes.len(), 1);
+        assert_eq!(deserialized.faction_changes[0].points_changes[0].change, 15);
     }
 }
