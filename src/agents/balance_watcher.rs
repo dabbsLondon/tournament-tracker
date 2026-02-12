@@ -322,4 +322,26 @@ mod tests {
         let agent = BalanceWatcherAgent::new(backend);
         assert_eq!(agent.name(), "balance_watcher");
     }
+
+    #[test]
+    fn test_balance_watcher_parse_response() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = BalanceWatcherAgent::new(backend);
+
+        let events = agent
+            .parse_response(mock_response(), "https://example.com")
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].data.title, "Balance Dataslate Spring 2025");
+        assert_eq!(events[0].confidence, Confidence::High);
+    }
+
+    #[test]
+    fn test_balance_watcher_retry_policy() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = BalanceWatcherAgent::new(backend);
+        let policy = agent.retry_policy();
+        assert_eq!(policy.max_retries, 3);
+        assert_eq!(policy.initial_delay_ms, 2000);
+    }
 }

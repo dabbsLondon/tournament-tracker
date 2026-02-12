@@ -500,4 +500,64 @@ mod tests {
         let date = parse_rss_date("Wed, 04 Feb 2026 13:00:57 +0000");
         assert_eq!(date, Some(NaiveDate::from_ymd_opt(2026, 2, 4).unwrap()));
     }
+
+    #[test]
+    fn test_decode_xml_entities_all_cases() {
+        assert_eq!(decode_xml_entities("&amp;"), "&");
+        assert_eq!(decode_xml_entities("&lt;"), "<");
+        assert_eq!(decode_xml_entities("&gt;"), ">");
+        assert_eq!(decode_xml_entities("&quot;"), "\"");
+        assert_eq!(decode_xml_entities("&#8217;"), "\u{2019}");
+        assert_eq!(decode_xml_entities("&#8211;"), "\u{2013}");
+        assert_eq!(decode_xml_entities("&#8230;"), "\u{2026}");
+        assert_eq!(decode_xml_entities("no entities here"), "no entities here");
+    }
+
+    #[test]
+    fn test_extract_xml_tag_cdata() {
+        let xml = "<title><![CDATA[Hello World]]></title>";
+        assert_eq!(extract_xml_tag(xml, "title"), Some("Hello World"));
+    }
+
+    #[test]
+    fn test_extract_xml_tag_missing() {
+        let xml = "<title>Hello</title>";
+        assert_eq!(extract_xml_tag(xml, "missing"), None);
+    }
+
+    #[test]
+    fn test_extract_text_from_html_empty() {
+        let text = extract_text_from_html("");
+        assert!(text.is_empty());
+    }
+
+    #[test]
+    fn test_extract_text_strips_svg_iframe() {
+        let html = "<div><p>Visible</p><svg><path d='M0 0'/></svg><iframe src='x'></iframe><p>Also visible</p></div>";
+        let text = extract_text_from_html(html);
+        assert!(text.contains("Visible"));
+        assert!(text.contains("Also visible"));
+        assert!(!text.contains("path"));
+    }
+
+    #[test]
+    fn test_parse_rss_date_invalid() {
+        assert_eq!(parse_rss_date("not a date"), None);
+        assert_eq!(parse_rss_date("2025-06-15"), None); // Not RFC2822
+    }
+
+    #[test]
+    fn test_filter_by_date_range_no_bounds() {
+        let base = Url::parse("https://www.goonhammer.com/").unwrap();
+        let articles = discover_goonhammer_articles(sample_html(), &base);
+        let filtered = filter_by_date_range(articles.clone(), None, None);
+        assert_eq!(filtered.len(), articles.len());
+    }
+
+    #[test]
+    fn test_discover_from_rss_empty() {
+        let rss = "<rss><channel></channel></rss>";
+        let articles = discover_from_rss(rss);
+        assert!(articles.is_empty());
+    }
 }

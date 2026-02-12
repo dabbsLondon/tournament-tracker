@@ -213,4 +213,93 @@ mod tests {
         assert!(placement.battle_points.is_none());
         assert_eq!(placement.extraction_confidence, Confidence::Medium);
     }
+
+    #[test]
+    fn test_event_from_stub_with_epoch() {
+        let article_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
+        let stub = make_event_stub("Epoch Test", Some(article_date), None, None);
+        let epoch_id = EntityId::from("epoch-001");
+
+        let event = event_from_stub(
+            &stub,
+            "https://goonhammer.com/article",
+            article_date,
+            "goonhammer",
+            Some(epoch_id.clone()),
+        );
+
+        assert_eq!(event.epoch_id, epoch_id);
+    }
+
+    #[test]
+    fn test_event_from_stub_no_date_uses_article_date() {
+        let article_date = NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
+        let stub = make_event_stub("No Date Event", None, Some("Somewhere"), Some(50));
+
+        let event = event_from_stub(
+            &stub,
+            "https://goonhammer.com/article",
+            article_date,
+            "goonhammer",
+            None,
+        );
+
+        assert_eq!(event.date, article_date);
+        assert_eq!(event.epoch_id, EntityId::from("current"));
+    }
+
+    #[test]
+    fn test_placement_from_stub_with_record() {
+        let event_id = EntityId::from("event-789");
+        let epoch_id = EntityId::from("epoch-002");
+
+        let stub = AgentOutput::new(
+            PlacementStub {
+                rank: 2,
+                player_name: "Alice".to_string(),
+                faction: "Necrons".to_string(),
+                subfaction: None,
+                detachment: Some("Canoptek Court".to_string()),
+                record: Some(WinLossRecord {
+                    wins: 4,
+                    losses: 1,
+                    draws: 0,
+                }),
+                battle_points: None,
+            },
+            Confidence::Medium,
+        );
+
+        let placement = placement_from_stub(&stub, event_id, Some(epoch_id.clone()));
+
+        assert_eq!(placement.epoch_id, epoch_id);
+        assert_eq!(placement.detachment, Some("Canoptek Court".to_string()));
+        assert!(placement.record.is_some());
+    }
+
+    #[test]
+    fn test_placement_from_stub_minimal() {
+        let event_id = EntityId::from("event-min");
+
+        let stub = AgentOutput::new(
+            PlacementStub {
+                rank: 10,
+                player_name: "Bob".to_string(),
+                faction: "Orks".to_string(),
+                subfaction: None,
+                detachment: None,
+                record: None,
+                battle_points: None,
+            },
+            Confidence::Low,
+        );
+
+        let placement = placement_from_stub(&stub, event_id, None);
+
+        assert_eq!(placement.rank, 10);
+        assert_eq!(placement.epoch_id, EntityId::from("current"));
+        assert!(placement.subfaction.is_none());
+        assert!(placement.detachment.is_none());
+        assert!(placement.record.is_none());
+    }
 }

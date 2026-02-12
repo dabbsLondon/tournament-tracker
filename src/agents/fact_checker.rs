@@ -428,4 +428,50 @@ mod tests {
         let agent = FactCheckerAgent::new(backend);
         assert_eq!(agent.name(), "fact_checker");
     }
+
+    #[test]
+    fn test_fact_checker_parse_verified_response() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = FactCheckerAgent::new(backend);
+
+        let output = agent.parse_response(mock_verified_response()).unwrap();
+        assert!(output.verified);
+        assert!(output.discrepancies.is_empty());
+        assert_eq!(output.overall_confidence, Confidence::High);
+    }
+
+    #[test]
+    fn test_fact_checker_parse_failed_response() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = FactCheckerAgent::new(backend);
+
+        let output = agent.parse_response(mock_failed_response()).unwrap();
+        assert!(!output.verified);
+        assert_eq!(output.discrepancies.len(), 2);
+        assert_eq!(output.corrections.len(), 1);
+    }
+
+    #[test]
+    fn test_fact_checker_retry_policy() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = FactCheckerAgent::new(backend);
+        let policy = agent.retry_policy();
+        assert_eq!(policy.max_retries, 2);
+    }
+
+    #[test]
+    fn test_discrepancy_serialization() {
+        let disc = Discrepancy {
+            field: "faction".to_string(),
+            extracted_value: "Eldar".to_string(),
+            source_evidence: Some("Aeldari player".to_string()),
+            severity: Severity::Major,
+            description: "Wrong name".to_string(),
+        };
+
+        let json = serde_json::to_string(&disc).unwrap();
+        let parsed: Discrepancy = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.field, "faction");
+        assert_eq!(parsed.severity, Severity::Major);
+    }
 }

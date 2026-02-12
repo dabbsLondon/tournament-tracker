@@ -772,4 +772,100 @@ mod tests {
             _ => panic!("Expected Anthropic"),
         }
     }
+
+    #[test]
+    fn test_ollama_backend_new() {
+        let backend = OllamaBackend::new(
+            "http://localhost:11434".to_string(),
+            "llama3.2".to_string(),
+            60,
+        );
+        assert_eq!(backend.name(), "ollama");
+    }
+
+    #[test]
+    fn test_ollama_from_config() {
+        let config = AiBackendConfig::Ollama {
+            base_url: "http://localhost:11434".to_string(),
+            model: "llama3.2".to_string(),
+            timeout_seconds: 120,
+        };
+        let backend = OllamaBackend::from_config(&config);
+        assert!(backend.is_some());
+    }
+
+    #[test]
+    fn test_create_backend_ollama() {
+        let config = AiBackendConfig::Ollama {
+            base_url: "http://localhost:11434".to_string(),
+            model: "llama3.2".to_string(),
+            timeout_seconds: 60,
+        };
+        let backend = create_backend(&config);
+        assert_eq!(backend.name(), "ollama");
+    }
+
+    #[test]
+    fn test_token_usage_default() {
+        let usage = TokenUsage::default();
+        assert_eq!(usage.prompt_tokens, 0);
+        assert_eq!(usage.completion_tokens, 0);
+        assert_eq!(usage.total_tokens, 0);
+    }
+
+    #[test]
+    fn test_message_role_serialization() {
+        let role = MessageRole::System;
+        let json = serde_json::to_string(&role).unwrap();
+        assert_eq!(json, "\"system\"");
+
+        let role = MessageRole::User;
+        let json = serde_json::to_string(&role).unwrap();
+        assert_eq!(json, "\"user\"");
+
+        let role = MessageRole::Assistant;
+        let json = serde_json::to_string(&role).unwrap();
+        assert_eq!(json, "\"assistant\"");
+
+        let parsed: MessageRole = serde_json::from_str("\"system\"").unwrap();
+        assert_eq!(parsed, MessageRole::System);
+    }
+
+    #[test]
+    fn test_ollama_request_serialization() {
+        let request = OllamaRequest {
+            model: "llama3.2".to_string(),
+            messages: vec![OllamaMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            }],
+            stream: false,
+            format: Some("json".to_string()),
+            options: OllamaOptions {
+                temperature: Some(0.7),
+                num_predict: Some(1000),
+            },
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("llama3.2"));
+        assert!(json.contains("Hello"));
+        assert!(json.contains("json"));
+    }
+
+    #[test]
+    fn test_ollama_response_deserialization() {
+        let json = r#"{
+            "message": {"role": "assistant", "content": "{\"events\": []}"},
+            "model": "llama3.2",
+            "prompt_eval_count": 100,
+            "eval_count": 50
+        }"#;
+
+        let response: OllamaResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.message.content, "{\"events\": []}");
+        assert_eq!(response.model, "llama3.2");
+        assert_eq!(response.prompt_eval_count, Some(100));
+        assert_eq!(response.eval_count, Some(50));
+    }
 }

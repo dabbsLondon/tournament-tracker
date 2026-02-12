@@ -455,4 +455,128 @@ mod tests {
         assert_eq!(config.cache_ttl, Duration::from_secs(3600));
         assert!(config.user_agent.contains("Mozilla"));
     }
+
+    #[tokio::test]
+    async fn test_check_cache_file_missing() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = test_config(&temp_dir);
+        let fetcher = Fetcher::new(config).unwrap();
+
+        let url = Url::parse("https://example.com/missing").unwrap();
+        let cache_path = fetcher.cache_path_for_url(&url);
+        let meta_path = fetcher.meta_path_for_url(&url);
+
+        let result = fetcher
+            .check_cache(&url, &cache_path, &meta_path)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_read_cached_text() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test.html");
+        tokio::fs::write(&cache_path, "Hello World").await.unwrap();
+
+        let config = test_config(&temp_dir);
+        let fetcher = Fetcher::new(config).unwrap();
+
+        let result = FetchResult {
+            url: Url::parse("https://example.com/page").unwrap(),
+            cache_path: cache_path.clone(),
+            content_type: Some("text/html".to_string()),
+            content_length: 11,
+            fetched_at: Utc::now(),
+            from_cache: false,
+            etag: None,
+            last_modified: None,
+        };
+
+        let text = fetcher.read_cached_text(&result).await.unwrap();
+        assert_eq!(text, "Hello World");
+    }
+
+    #[tokio::test]
+    async fn test_read_cached_bytes() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test.bin");
+        tokio::fs::write(&cache_path, b"\x00\x01\x02\x03")
+            .await
+            .unwrap();
+
+        let config = test_config(&temp_dir);
+        let fetcher = Fetcher::new(config).unwrap();
+
+        let result = FetchResult {
+            url: Url::parse("https://example.com/file.pdf").unwrap(),
+            cache_path: cache_path.clone(),
+            content_type: Some("application/pdf".to_string()),
+            content_length: 4,
+            fetched_at: Utc::now(),
+            from_cache: false,
+            etag: None,
+            last_modified: None,
+        };
+
+        let bytes = fetcher.read_cached_bytes(&result).await.unwrap();
+        assert_eq!(bytes, b"\x00\x01\x02\x03");
+    }
+
+    #[test]
+    fn test_meta_path_for_url() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = test_config(&temp_dir);
+        let fetcher = Fetcher::new(config).unwrap();
+
+        let url = Url::parse("https://example.com/page").unwrap();
+        let meta_path = fetcher.meta_path_for_url(&url);
+
+        assert!(meta_path.to_string_lossy().contains("example.com"));
+        assert!(meta_path.to_string_lossy().ends_with(".meta.json"));
+    }
+
+    #[tokio::test]
+    async fn test_check_cache_expired() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = FetcherConfig {
+            cache_dir: temp_dir.path().to_path_buf(),
+            cache_ttl: Duration::from_secs(0), // Immediately expire
+            max_content_size: 1024 * 1024,
+            timeout: Duration::from_secs(10),
+            user_agent: "test-agent".to_string(),
+            request_delay: Duration::from_millis(0),
+        };
+        let fetcher = Fetcher::new(config).unwrap();
+
+        let url = Url::parse("https://example.com/expired").unwrap();
+        let cache_path = fetcher.cache_path_for_url(&url);
+        let meta_path = fetcher.meta_path_for_url(&url);
+
+        // Create parent dirs and write cache files
+        tokio::fs::create_dir_all(cache_path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&cache_path, "cached content")
+            .await
+            .unwrap();
+
+        let meta = CacheMetadata {
+            url: url.to_string(),
+            fetched_at: chrono::Utc::now() - chrono::Duration::hours(2),
+            content_type: Some("text/html".to_string()),
+            content_length: 14,
+            etag: None,
+            last_modified: None,
+            expires_at: None,
+        };
+        let meta_json = serde_json::to_string(&meta).unwrap();
+        tokio::fs::write(&meta_path, meta_json).await.unwrap();
+
+        let result = fetcher
+            .check_cache(&url, &cache_path, &meta_path)
+            .await
+            .unwrap();
+        assert!(result.is_none()); // Expired, so no cache hit
+    }
 }

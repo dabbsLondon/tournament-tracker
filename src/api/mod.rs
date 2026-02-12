@@ -283,4 +283,105 @@ mod tests {
         assert_eq!(deduped[0].val, 1);
         assert_eq!(deduped[1].val, 2);
     }
+
+    #[test]
+    fn test_resolve_epoch_none_empty_mapper() {
+        let mapper = crate::models::EpochMapper::new();
+        let result = resolve_epoch(None, &mapper).unwrap();
+        assert_eq!(result, "current");
+    }
+
+    #[test]
+    fn test_resolve_epoch_current_string() {
+        let mapper = crate::models::EpochMapper::new();
+        let result = resolve_epoch(Some("current"), &mapper).unwrap();
+        assert_eq!(result, "current");
+    }
+
+    #[test]
+    fn test_resolve_epoch_empty_string() {
+        let mapper = crate::models::EpochMapper::new();
+        let result = resolve_epoch(Some(""), &mapper).unwrap();
+        assert_eq!(result, "current");
+    }
+
+    #[test]
+    fn test_resolve_epoch_specific_id_empty_mapper() {
+        let mapper = crate::models::EpochMapper::new();
+        // With an empty mapper, any ID is accepted
+        let result = resolve_epoch(Some("abc123"), &mapper).unwrap();
+        assert_eq!(result, "abc123");
+    }
+
+    #[test]
+    fn test_resolve_epoch_with_populated_mapper() {
+        use crate::models::{SignificantEvent, SignificantEventType};
+        let event = SignificantEvent::new(
+            SignificantEventType::BalanceUpdate,
+            chrono::NaiveDate::from_ymd_opt(2025, 6, 1).unwrap(),
+            "Test Balance".to_string(),
+            "https://example.com".to_string(),
+        );
+        let mapper = crate::models::EpochMapper::from_significant_events(&[event]);
+
+        // None should resolve to the current epoch
+        let result = resolve_epoch(None, &mapper).unwrap();
+        assert!(!result.is_empty());
+
+        // Invalid ID should fail
+        let err = resolve_epoch(Some("nonexistent"), &mapper);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_api_error_not_found() {
+        use axum::response::IntoResponse;
+        let error = ApiError::NotFound("test".to_string());
+        let response = error.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_api_error_bad_request() {
+        use axum::response::IntoResponse;
+        let error = ApiError::BadRequest("bad".to_string());
+        let response = error.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_api_error_internal() {
+        use axum::response::IntoResponse;
+        let error = ApiError::Internal("oops".to_string());
+        let response = error.into_response();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn test_pagination_meta_single_page() {
+        let p = Pagination::new(Some(1), Some(50));
+        let meta = PaginationMeta::new(&p, 10);
+        assert_eq!(meta.total_pages, 1);
+        assert!(!meta.has_next);
+        assert!(!meta.has_prev);
+    }
+
+    #[test]
+    fn test_pagination_meta_zero_items() {
+        let p = Pagination::new(Some(1), Some(10));
+        let meta = PaginationMeta::new(&p, 0);
+        assert_eq!(meta.total_pages, 0);
+        assert!(!meta.has_next);
+        assert!(!meta.has_prev);
+    }
+
+    #[test]
+    fn test_dedup_by_id_empty() {
+        let items: Vec<String> = vec![];
+        let deduped = dedup_by_id(items, |s| s.as_str());
+        assert!(deduped.is_empty());
+    }
 }

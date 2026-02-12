@@ -447,4 +447,53 @@ mod tests {
         let agent = ListNormalizerAgent::new(backend);
         assert_eq!(agent.name(), "list_normalizer");
     }
+
+    #[test]
+    fn test_normalized_list_serialization() {
+        let list = NormalizedArmyList {
+            faction: "Necrons".to_string(),
+            subfaction: None,
+            allegiance: Some("Xenos".to_string()),
+            detachment: Some("Canoptek Court".to_string()),
+            total_points: 2000,
+            units: vec![],
+            raw_text: "raw list text".to_string(),
+        };
+
+        let json = serde_json::to_string(&list).unwrap();
+        let parsed: NormalizedArmyList = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.faction, "Necrons");
+        assert_eq!(parsed.total_points, 2000);
+    }
+
+    #[test]
+    fn test_list_normalizer_parse_empty_units() {
+        let response = r#"{
+            "list": {
+                "faction": "Orks",
+                "subfaction": null,
+                "detachment": "Waaagh! Tribe",
+                "total_points": 0,
+                "units": [],
+                "confidence": "low",
+                "notes": ["Could not parse any units"]
+            }
+        }"#;
+
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = ListNormalizerAgent::new(backend);
+        let result = agent.parse_response(response, "raw text").unwrap();
+
+        assert_eq!(result.data.faction, "Orks");
+        assert_eq!(result.data.units.len(), 0);
+        assert_eq!(result.confidence, Confidence::Low);
+    }
+
+    #[test]
+    fn test_list_normalizer_retry_policy() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = ListNormalizerAgent::new(backend);
+        let policy = agent.retry_policy();
+        assert_eq!(policy.max_retries, 2);
+    }
 }

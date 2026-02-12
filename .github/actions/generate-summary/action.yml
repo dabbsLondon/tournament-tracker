@@ -11,6 +11,14 @@ inputs:
   coverage_result:
     description: 'Result of coverage job'
     required: true
+  frontend_test_result:
+    description: 'Result of frontend test job'
+    required: false
+    default: 'skipped'
+  frontend_coverage_result:
+    description: 'Result of frontend coverage job'
+    required: false
+    default: 'skipped'
 
 runs:
   using: 'composite'
@@ -36,7 +44,7 @@ runs:
         echo "" >> "$SUMMARY_FILE"
         
         # Overall status
-        if [ "${{ inputs.check_result }}" == "success" ] && [ "${{ inputs.test_result }}" == "success" ] && [ "${{ inputs.coverage_result }}" == "success" ]; then
+        if [ "${{ inputs.check_result }}" == "success" ] && [ "${{ inputs.test_result }}" == "success" ] && [ "${{ inputs.coverage_result }}" == "success" ] && [ "${{ inputs.frontend_test_result }}" == "success" ] && [ "${{ inputs.frontend_coverage_result }}" == "success" ]; then
           echo "## ✅ All Checks Passed" >> "$SUMMARY_FILE"
           echo "" >> "$SUMMARY_FILE"
         else
@@ -47,6 +55,8 @@ runs:
           echo "| Check | ${{ inputs.check_result == 'success' && '✅' || '❌' }} ${{ inputs.check_result }} |" >> "$SUMMARY_FILE"
           echo "| Test | ${{ inputs.test_result == 'success' && '✅' || '❌' }} ${{ inputs.test_result }} |" >> "$SUMMARY_FILE"
           echo "| Coverage | ${{ inputs.coverage_result == 'success' && '✅' || '❌' }} ${{ inputs.coverage_result }} |" >> "$SUMMARY_FILE"
+          echo "| Frontend Test | ${{ inputs.frontend_test_result == 'success' && '✅' || '❌' }} ${{ inputs.frontend_test_result }} |" >> "$SUMMARY_FILE"
+          echo "| Frontend Coverage | ${{ inputs.frontend_coverage_result == 'success' && '✅' || '❌' }} ${{ inputs.frontend_coverage_result }} |" >> "$SUMMARY_FILE"
           echo "" >> "$SUMMARY_FILE"
         fi
         
@@ -193,4 +203,5 @@ runs:
         echo "- 📊 **Coverage Report (HTML)**: Available in Coverage job artifacts" >> "$SUMMARY_FILE"
         echo "- 📄 **Coverage Report (LCOV)**: Available in Coverage job artifacts" >> "$SUMMARY_FILE"
         echo "- 📋 **Test Output**: Available in Test job artifacts" >> "$SUMMARY_FILE"
+        echo "- 🌐 **Frontend Coverage**: Available in Frontend Coverage job artifacts" >> "$SUMMARY_FILE"
         echo "" >> "$SUMMARY_FILE"

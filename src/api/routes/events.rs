@@ -1033,6 +1033,293 @@ pub async fn get_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::build_router;
+    use crate::api::state::AppState;
+    use crate::models::{ArmyList, EpochMapper, Unit};
+    use crate::storage::StorageConfig;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use serde_json::Value;
+    use std::sync::Arc;
+    use tower::util::ServiceExt;
+
+    fn write_jsonl<T: serde::Serialize>(path: &std::path::Path, items: &[T]) {
+        let mut content = String::new();
+        for item in items {
+            content.push_str(&serde_json::to_string(item).unwrap());
+            content.push('\n');
+        }
+        std::fs::write(path, content).unwrap();
+    }
+
+    fn setup_test_state(dir: &std::path::Path) -> AppState {
+        let storage = StorageConfig::new(dir.to_path_buf());
+        let epoch_dir = dir.join("normalized").join("current");
+        std::fs::create_dir_all(&epoch_dir).unwrap();
+        AppState {
+            storage: Arc::new(storage),
+            epoch_mapper: Arc::new(EpochMapper::new()),
+        }
+    }
+
+    async fn get_json(app: axum::Router, uri: &str) -> (StatusCode, Value) {
+        let resp = app
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        (status, json)
+    }
+
+    fn make_event(name: &str, date: &str, source_url: &str) -> Event {
+        Event::new(
+            name.to_string(),
+            chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap(),
+            source_url.to_string(),
+            "test".to_string(),
+            "current".into(),
+        )
+    }
+
+    fn make_placement(event: &Event, rank: u32, player: &str, faction: &str) -> Placement {
+        Placement::new(
+            event.id.clone(),
+            "current".into(),
+            rank,
+            player.to_string(),
+            faction.to_string(),
+        )
+    }
+
+    // ── Endpoint Tests ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_list_events_has_lists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 = make_event("GT Alpha", "2025-01-15", "https://example.com/a");
+        let e2 = make_event("GT Beta", "2025-01-22", "https://example.com/b");
+
+        // Only e1 has army lists (matching source_url)
+        let list = ArmyList::new(
+            "Aeldari".to_string(),
+            2000,
+            vec![Unit::new("Wraithguard".to_string(), 5)],
+            "raw".to_string(),
+        )
+        .with_source_url("https://example.com/a".to_string());
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/events").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 2);
+        // e2 is first (newer date, sorted desc)
+        assert_eq!(events[0]["has_lists"], false);
+        assert_eq!(events[1]["has_lists"], true);
+    }
+
+    #[tokio::test]
+    async fn test_list_events_completed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        // Past event with placements = completed
+        let e1 = make_event("GT Alpha", "2025-01-15", "https://example.com/a");
+        // Future event = not completed
+        let e2 = make_event("GT Future", "2099-12-31", "https://example.com/b");
+
+        let p1 = make_placement(&e1, 1, "Alice", "Aeldari");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1]);
+        write_jsonl::<ArmyList>(&epoch_dir.join("army_lists.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/events").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let events = json["events"].as_array().unwrap();
+        // Future event first (sorted by date desc)
+        assert_eq!(events[0]["completed"], false);
+        assert_eq!(events[1]["completed"], true);
+    }
+
+    #[tokio::test]
+    async fn test_list_events_date_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 = make_event("GT Jan", "2025-01-15", "https://example.com/a");
+        let e2 = make_event("GT Mar", "2025-03-15", "https://example.com/b");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+        write_jsonl::<ArmyList>(&epoch_dir.join("army_lists.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/events?from=2025-02-01").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["name"], "GT Mar");
+    }
+
+    #[tokio::test]
+    async fn test_list_events_has_results_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 = make_event("GT With Results", "2025-01-15", "https://example.com/a");
+        let e2 = make_event("GT No Results", "2025-01-22", "https://example.com/b");
+
+        let p1 = make_placement(&e1, 1, "Alice", "Aeldari");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1]);
+        write_jsonl::<ArmyList>(&epoch_dir.join("army_lists.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/events?has_results=true").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["name"], "GT With Results");
+    }
+
+    #[tokio::test]
+    async fn test_list_events_winner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 = make_event("GT Alpha", "2025-01-15", "https://example.com/a");
+        let p1 = make_placement(&e1, 1, "Alice", "Aeldari");
+        let p2 = make_placement(&e1, 2, "Bob", "Necrons");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2]);
+        write_jsonl::<ArmyList>(&epoch_dir.join("army_lists.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/events").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events[0]["winner"]["player_name"], "Alice");
+        assert_eq!(events[0]["winner"]["faction"], "Aeldari");
+    }
+
+    #[tokio::test]
+    async fn test_list_events_pagination() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 = make_event("GT A", "2025-01-01", "https://example.com/a");
+        let e2 = make_event("GT B", "2025-01-02", "https://example.com/b");
+        let e3 = make_event("GT C", "2025-01-03", "https://example.com/c");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2, &e3]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+        write_jsonl::<ArmyList>(&epoch_dir.join("army_lists.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/events?page=1&page_size=2").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(json["pagination"]["total_items"], 3);
+        assert_eq!(json["pagination"]["total_pages"], 2);
+        assert_eq!(json["pagination"]["has_next"], true);
+    }
+
+    // ── Helper Function Tests ──────────────────────────────────
+
+    #[test]
+    fn test_parse_faction_from_raw_keyword_line() {
+        let raw = "++ Army ++\nFACTION KEYWORD: Imperium – Astra Militarum\n++ HQ ++";
+        assert_eq!(
+            parse_faction_from_raw(raw),
+            Some("Astra Militarum".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_faction_from_raw_faction_line() {
+        let raw = "Faction: Necrons\nDetachment: Awakened Dynasty";
+        assert_eq!(parse_faction_from_raw(raw), Some("Necrons".to_string()));
+    }
+
+    #[test]
+    fn test_parse_faction_from_raw_fallback() {
+        let raw = "++ Army Roster ++\nSome list with Aeldari units\n++ HQ ++";
+        assert_eq!(parse_faction_from_raw(raw), Some("Aeldari".to_string()));
+    }
+
+    #[test]
+    fn test_parse_faction_from_raw_none() {
+        let raw = "++ Random stuff ++\nNo factions here\n++ End ++";
+        assert_eq!(parse_faction_from_raw(raw), None);
+    }
+
+    #[test]
+    fn test_parse_detachment_from_raw() {
+        let raw = "Detachment: Ironstorm Spearhead\nSome units";
+        assert_eq!(
+            parse_detachment_from_raw(raw),
+            Some("Ironstorm Spearhead".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_detachment_from_raw_none() {
+        let raw = "++ Army Roster ++\nNo detachment line";
+        assert_eq!(parse_detachment_from_raw(raw), None);
+    }
+
+    #[test]
+    fn test_unit_to_detail() {
+        let unit = Unit::new("Leman Russ".to_string(), 2)
+            .with_points(160)
+            .with_keywords(vec!["Vehicle".to_string()]);
+        let detail = unit_to_detail(&unit);
+        assert_eq!(detail.name, "Leman Russ");
+        assert_eq!(detail.count, 2);
+        assert_eq!(detail.points, Some(160));
+        assert_eq!(detail.keywords, vec!["Vehicle"]);
+    }
+
+    #[test]
+    fn test_is_conflicting_contains() {
+        // Function expects lowercase input (called internally with lowercased strings)
+        assert!(is_conflicting_contains(
+            "space marines",
+            "chaos space marines"
+        ));
+        assert!(is_conflicting_contains(
+            "chaos space marines",
+            "space marines"
+        ));
+        assert!(!is_conflicting_contains("necrons", "aeldari"));
+    }
 
     #[test]
     fn test_normalize_faction_name() {

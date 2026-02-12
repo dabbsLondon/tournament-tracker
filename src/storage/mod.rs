@@ -106,4 +106,28 @@ mod tests {
         let config = StorageConfig::default();
         assert_eq!(config.data_dir, PathBuf::from("./data"));
     }
+
+    #[test]
+    fn test_storage_config_logs_dir() {
+        let config = StorageConfig::new(PathBuf::from("/data"));
+        assert_eq!(config.logs_dir(), PathBuf::from("/data/logs"));
+    }
+
+    #[test]
+    fn test_storage_config_review_queue_dir() {
+        let config = StorageConfig::new(PathBuf::from("/data"));
+        assert_eq!(
+            config.review_queue_dir(),
+            PathBuf::from("/data/review_queue")
+        );
+    }
+
+    #[test]
+    fn test_storage_config_significant_events_path() {
+        let config = StorageConfig::new(PathBuf::from("/data"));
+        assert_eq!(
+            config.significant_events_path(),
+            PathBuf::from("/data/normalized/significant_events.jsonl")
+        );
+    }
 }

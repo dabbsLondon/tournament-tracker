@@ -858,6 +858,231 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_analytics_overview_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        write_jsonl::<Event>(&epoch_dir.join("events.jsonl"), &[]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/analytics/overview").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["total_events"], 0);
+        assert_eq!(json["total_placements"], 0);
+        assert_eq!(json["total_unique_players"], 0);
+        assert!(json["most_popular_faction"].is_null());
+    }
+
+    fn setup_test_state_with_epoch(dir: &std::path::Path) -> AppState {
+        use crate::models::{SignificantEvent, SignificantEventType};
+        let storage = StorageConfig::new(dir.to_path_buf());
+        let sig_event = SignificantEvent::new(
+            SignificantEventType::BalanceUpdate,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+            "Jan 2025 Balance".to_string(),
+            "https://example.com".to_string(),
+        );
+        let mapper = crate::models::EpochMapper::from_significant_events(&[sig_event]);
+        // Create the epoch directory using the first epoch id
+        let epoch_id = mapper.all_epochs()[0].id.as_str();
+        let epoch_dir = dir.join("normalized").join(epoch_id);
+        std::fs::create_dir_all(&epoch_dir).unwrap();
+        AppState {
+            storage: Arc::new(storage),
+            epoch_mapper: Arc::new(mapper),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_analytics_trends() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state_with_epoch(tmp.path());
+        let epoch_id = state.epoch_mapper.all_epochs()[0].id.as_str().to_string();
+        let epoch_dir = tmp.path().join("normalized").join(&epoch_id);
+
+        let e1 = make_event("GT Alpha", "2026-01-15", "https://example.com/a");
+        let p1 = make_placement(&e1, 1, "Alice", "Aeldari");
+        let p2 = make_placement(&e1, 2, "Bob", "Necrons");
+        let p3 = make_placement(&e1, 3, "Charlie", "Aeldari");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2, &p3]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/analytics/trends").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let factions = json["factions"].as_array().unwrap();
+        assert!(!factions.is_empty());
+        for f in factions {
+            assert!(!f["data_points"].as_array().unwrap().is_empty());
+            assert!(!f["faction"].as_str().unwrap().is_empty());
+            assert!(!f["allegiance"].as_str().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_analytics_trends_with_faction_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state_with_epoch(tmp.path());
+        let epoch_id = state.epoch_mapper.all_epochs()[0].id.as_str().to_string();
+        let epoch_dir = tmp.path().join("normalized").join(&epoch_id);
+
+        let e1 = make_event("GT Alpha", "2026-01-15", "https://example.com/a");
+        let p1 = make_placement(&e1, 1, "Alice", "Aeldari");
+        let p2 = make_placement(&e1, 2, "Bob", "Necrons");
+        let p3 = make_placement(&e1, 3, "Charlie", "Orks");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2, &p3]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/analytics/trends?factions=Aeldari,Necrons").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let factions = json["factions"].as_array().unwrap();
+        assert_eq!(factions.len(), 2);
+        let names: Vec<&str> = factions
+            .iter()
+            .map(|f| f["faction"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"Aeldari"));
+        assert!(names.contains(&"Necrons"));
+    }
+
+    #[tokio::test]
+    async fn test_analytics_trends_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        write_jsonl::<Event>(&epoch_dir.join("events.jsonl"), &[]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/analytics/trends").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["factions"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_analytics_units() {
+        use crate::models::{ArmyList, Unit};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let u1 = Unit::new("Leman Russ".to_string(), 2).with_points(160);
+        let u2 = Unit::new("Infantry Squad".to_string(), 10).with_points(65);
+        let list1 = ArmyList::new(
+            "Astra Militarum".to_string(),
+            2000,
+            vec![u1.clone(), u2.clone()],
+            "raw".to_string(),
+        );
+
+        let u3 = Unit::new("Leman Russ".to_string(), 1).with_points(160);
+        let list2 = ArmyList::new(
+            "Astra Militarum".to_string(),
+            2000,
+            vec![u3],
+            "raw".to_string(),
+        );
+
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list1, &list2]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/analytics/units").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["total_lists_analysed"], 2);
+
+        let top = json["top_units"].as_array().unwrap();
+        assert!(!top.is_empty());
+        // Leman Russ appears in 2 lists, Infantry Squad in 1
+        assert_eq!(top[0]["name"], "Leman Russ");
+        assert_eq!(top[0]["lists_containing"], 2);
+        assert_eq!(top[0]["avg_points"], 160);
+    }
+
+    #[tokio::test]
+    async fn test_analytics_units_with_faction_filter() {
+        use crate::models::{ArmyList, Unit};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let list1 = ArmyList::new(
+            "Astra Militarum".to_string(),
+            2000,
+            vec![Unit::new("Leman Russ".to_string(), 1)],
+            "raw".to_string(),
+        );
+        let list2 = ArmyList::new(
+            "Aeldari".to_string(),
+            2000,
+            vec![Unit::new("Wraithlord".to_string(), 1)],
+            "raw".to_string(),
+        );
+
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list1, &list2]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/analytics/units?faction=Astra%20Militarum").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["total_lists_analysed"], 1);
+        let top = json["top_units"].as_array().unwrap();
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0]["name"], "Leman Russ");
+    }
+
+    #[tokio::test]
+    async fn test_analytics_units_empty() {
+        use crate::models::ArmyList;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        write_jsonl::<ArmyList>(&epoch_dir.join("army_lists.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/analytics/units").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["total_lists_analysed"], 0);
+        assert!(json["top_units"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_analytics_players_min_events_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 = make_event("GT Alpha", "2026-01-15", "https://example.com/a");
+        let p1 = make_placement(&e1, 1, "Alice", "Aeldari");
+        let p2 = make_placement(&e1, 2, "Bob", "Necrons");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2]);
+
+        let app = build_router(state);
+        // min_events=2 means nobody qualifies (1 event each)
+        let (status, json) = get_json(app, "/api/analytics/players?min_events=2").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["players"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn test_analytics_players() {
         let tmp = tempfile::tempdir().unwrap();
         let state = setup_test_state(tmp.path());

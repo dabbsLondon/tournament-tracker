@@ -365,7 +365,7 @@ async fn main() -> Result<()> {
 
             // Parse interval
             let sync_interval =
-                parse_duration(&interval_str).unwrap_or(Duration::from_secs(6 * 3600));
+                meta_agent::parse_duration(&interval_str).unwrap_or(Duration::from_secs(6 * 3600));
 
             let sync_config = SyncConfig {
                 sources,
@@ -1451,26 +1451,4 @@ fn select_backend() -> Arc<dyn AiBackend> {
         "llama3.2".to_string(),
         120,
     ))
-}
-
-/// Parse a human-friendly duration string (e.g., "6h", "30m", "90s").
-fn parse_duration(s: &str) -> Option<Duration> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-
-    let (num_str, multiplier) = if let Some(n) = s.strip_suffix('h') {
-        (n, 3600)
-    } else if let Some(n) = s.strip_suffix('m') {
-        (n, 60)
-    } else if let Some(n) = s.strip_suffix('s') {
-        (n, 1)
-    } else {
-        // Default to seconds
-        (s, 1)
-    };
-
-    let num: u64 = num_str.parse().ok()?;
-    Some(Duration::from_secs(num * multiplier))
 }

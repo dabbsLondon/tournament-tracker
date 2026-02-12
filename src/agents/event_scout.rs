@@ -318,4 +318,45 @@ mod tests {
         let agent = EventScoutAgent::new(backend);
         assert_eq!(agent.name(), "event_scout");
     }
+
+    #[test]
+    fn test_event_stub_all_fields_serialization() {
+        let stub = EventStub {
+            name: "Big GT 2025".to_string(),
+            date: Some(NaiveDate::from_ymd_opt(2025, 8, 10).unwrap()),
+            location: Some("New York, USA".to_string()),
+            player_count: Some(200),
+            round_count: Some(6),
+            event_type: Some("Major".to_string()),
+            article_section: Some("Event Recap".to_string()),
+        };
+
+        let json = serde_json::to_string(&stub).unwrap();
+        let parsed: EventStub = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.name, "Big GT 2025");
+        assert_eq!(parsed.player_count, Some(200));
+        assert_eq!(parsed.article_section, Some("Event Recap".to_string()));
+    }
+
+    #[test]
+    fn test_event_scout_parse_response() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = EventScoutAgent::new(backend);
+
+        let response = mock_response();
+        let events = agent.parse_response(response).unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].data.name, "London GT 2025");
+        assert_eq!(events[0].confidence, Confidence::High);
+        assert_eq!(events[1].confidence, Confidence::Medium);
+    }
+
+    #[test]
+    fn test_event_scout_retry_policy() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = EventScoutAgent::new(backend);
+        let policy = agent.retry_policy();
+        assert_eq!(policy.max_retries, 3);
+    }
 }

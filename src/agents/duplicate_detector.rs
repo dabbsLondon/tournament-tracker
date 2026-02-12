@@ -365,4 +365,77 @@ mod tests {
         let agent = DuplicateDetectorAgent::new(backend);
         assert_eq!(agent.name(), "duplicate_detector");
     }
+
+    #[test]
+    fn test_duplicate_detector_parse_response_duplicate() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = DuplicateDetectorAgent::new(backend);
+
+        let existing = vec![EntitySummary {
+            id: EntityId::from("existing-123"),
+            entity_type: "event".to_string(),
+            key_fields: serde_json::json!({"name": "London GT 2025"}),
+        }];
+
+        let output = agent
+            .parse_response(mock_duplicate_response(), &existing)
+            .unwrap();
+        assert!(output.is_duplicate);
+        assert_eq!(
+            output.matching_entity_id,
+            Some(EntityId::from("existing-123"))
+        );
+        assert!(output.similarity_score > 0.9);
+    }
+
+    #[test]
+    fn test_duplicate_detector_parse_response_no_duplicate() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = DuplicateDetectorAgent::new(backend);
+
+        let existing = vec![EntitySummary {
+            id: EntityId::from("existing-123"),
+            entity_type: "event".to_string(),
+            key_fields: serde_json::json!({"name": "London GT 2024"}),
+        }];
+
+        let output = agent
+            .parse_response(mock_no_duplicate_response(), &existing)
+            .unwrap();
+        assert!(!output.is_duplicate);
+        assert!(output.matching_entity_id.is_none());
+    }
+
+    #[test]
+    fn test_duplicate_detector_retry_policy() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = DuplicateDetectorAgent::new(backend);
+        let policy = agent.retry_policy();
+        assert_eq!(policy.max_retries, 2);
+        assert_eq!(policy.initial_delay_ms, 500);
+    }
+
+    #[test]
+    fn test_duplicate_detector_similarity_clamped() {
+        let json = r#"{
+            "check": {
+                "is_duplicate": true,
+                "matching_index": 0,
+                "similarity_score": 1.5,
+                "match_reasons": ["test"]
+            }
+        }"#;
+
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = DuplicateDetectorAgent::new(backend);
+
+        let existing = vec![EntitySummary {
+            id: EntityId::from("test"),
+            entity_type: "event".to_string(),
+            key_fields: serde_json::json!({}),
+        }];
+
+        let output = agent.parse_response(json, &existing).unwrap();
+        assert_eq!(output.similarity_score, 1.0); // Clamped to 1.0
+    }
 }

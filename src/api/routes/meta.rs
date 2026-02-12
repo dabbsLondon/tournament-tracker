@@ -917,4 +917,128 @@ mod tests {
 
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
+
+    // ── faction_stats endpoint tests ────────────────────────────
+
+    #[tokio::test]
+    async fn test_faction_stats_basic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("GT Alpha", "2025-01-15", "https://example.com/a");
+        let p1 = make_placement(&event, 1, "Alice", "Aeldari");
+        let p2 = make_placement(&event, 2, "Bob", "Aeldari");
+        let p3 = make_placement(&event, 3, "Charlie", "Necrons");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2, &p3]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &Vec::<ArmyList>::new());
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/meta/factions").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let factions = json["factions"].as_array().unwrap();
+        assert_eq!(factions.len(), 2);
+        // Aeldari has 2 placements, so should have higher meta_share
+        let aeldari = factions.iter().find(|f| f["faction"] == "Aeldari").unwrap();
+        assert_eq!(aeldari["count"], 2);
+        assert!(aeldari["meta_share"].as_f64().unwrap() > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_faction_stats_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        write_jsonl::<Event>(&epoch_dir.join("events.jsonl"), &[]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &Vec::<ArmyList>::new());
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/meta/factions").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["factions"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_faction_stats_win_rate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 = make_event("GT A", "2025-01-15", "https://example.com/a");
+        let e2 = make_event("GT B", "2025-01-22", "https://example.com/b");
+        // Aeldari wins both
+        let p1 = make_placement(&e1, 1, "Alice", "Aeldari");
+        let p2 = make_placement(&e1, 2, "Bob", "Necrons");
+        let p3 = make_placement(&e2, 1, "Alice", "Aeldari");
+        let p4 = make_placement(&e2, 2, "Charlie", "Necrons");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2, &p3, &p4]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &Vec::<ArmyList>::new());
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/meta/factions").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let factions = json["factions"].as_array().unwrap();
+        let aeldari = factions.iter().find(|f| f["faction"] == "Aeldari").unwrap();
+        // 2 wins / 2 appearances = 100% win rate
+        assert!(aeldari["win_rate"].as_f64().unwrap() > 50.0);
+    }
+
+    // ── allegiance_stats endpoint tests ─────────────────────────
+
+    #[tokio::test]
+    async fn test_allegiance_stats_basic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("GT Alpha", "2025-01-15", "https://example.com/a");
+        let p1 = make_placement(&event, 1, "Alice", "Aeldari");
+        let p2 = make_placement(&event, 2, "Bob", "Space Marines");
+        let p3 = make_placement(&event, 3, "Charlie", "Chaos Space Marines");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2, &p3]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &Vec::<ArmyList>::new());
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/meta/allegiances").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let allegiances = json["allegiances"].as_array().unwrap();
+        assert!(allegiances.len() >= 2);
+        // Should have Imperium, Xenos, Chaos
+        let names: Vec<&str> = allegiances
+            .iter()
+            .map(|a| a["allegiance"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"Imperium"));
+        assert!(names.contains(&"Xenos"));
+        assert!(names.contains(&"Chaos"));
+    }
+
+    #[tokio::test]
+    async fn test_allegiance_stats_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        write_jsonl::<Event>(&epoch_dir.join("events.jsonl"), &[]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &Vec::<ArmyList>::new());
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/meta/allegiances").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["allegiances"].as_array().unwrap().is_empty());
+    }
 }

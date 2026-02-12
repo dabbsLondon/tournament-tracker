@@ -505,4 +505,245 @@ mod tests {
             .join("events.jsonl");
         assert_eq!(writer.path, expected);
     }
+
+    #[test]
+    fn test_append_batch() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("batch.jsonl");
+
+        let writer: JsonlWriter<TestEntity> = JsonlWriter::new(path.clone());
+        let reader: JsonlReader<TestEntity> = JsonlReader::new(path);
+
+        let entities = vec![
+            TestEntity {
+                id: "1".to_string(),
+                name: "A".to_string(),
+                value: 10,
+            },
+            TestEntity {
+                id: "2".to_string(),
+                name: "B".to_string(),
+                value: 20,
+            },
+            TestEntity {
+                id: "3".to_string(),
+                name: "C".to_string(),
+                value: 30,
+            },
+        ];
+
+        let count = writer.append_batch(&entities).unwrap();
+        assert_eq!(count, 3);
+
+        let read = reader.read_all().unwrap();
+        assert_eq!(read.len(), 3);
+        assert_eq!(read[0].name, "A");
+        assert_eq!(read[2].name, "C");
+    }
+
+    #[test]
+    fn test_append_batch_empty() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("empty_batch.jsonl");
+
+        let writer: JsonlWriter<TestEntity> = JsonlWriter::new(path);
+        let count = writer.append_batch(&[]).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_write_all_overwrites_existing() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("overwrite.jsonl");
+
+        let writer: JsonlWriter<TestEntity> = JsonlWriter::new(path.clone());
+        let reader: JsonlReader<TestEntity> = JsonlReader::new(path);
+
+        writer
+            .write_all(&[TestEntity {
+                id: "1".to_string(),
+                name: "Old".to_string(),
+                value: 1,
+            }])
+            .unwrap();
+        assert_eq!(reader.read_all().unwrap().len(), 1);
+
+        writer
+            .write_all(&[
+                TestEntity {
+                    id: "2".to_string(),
+                    name: "New1".to_string(),
+                    value: 2,
+                },
+                TestEntity {
+                    id: "3".to_string(),
+                    name: "New2".to_string(),
+                    value: 3,
+                },
+            ])
+            .unwrap();
+
+        let read = reader.read_all().unwrap();
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].name, "New1");
+    }
+
+    #[test]
+    fn test_read_all_skips_bad_lines() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("bad_lines.jsonl");
+
+        // Write a mix of valid and invalid lines
+        std::fs::write(
+            &path,
+            r#"{"id":"1","name":"Good","value":1}
+not-valid-json
+{"id":"2","name":"Also Good","value":2}
+"#,
+        )
+        .unwrap();
+
+        let reader: JsonlReader<TestEntity> = JsonlReader::new(path);
+        let entities = reader.read_all().unwrap();
+        assert_eq!(entities.len(), 2);
+        assert_eq!(entities[0].name, "Good");
+        assert_eq!(entities[1].name, "Also Good");
+    }
+
+    #[test]
+    fn test_reader_exists_true() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("exists.jsonl");
+        std::fs::write(&path, "").unwrap();
+
+        let reader: JsonlReader<TestEntity> = JsonlReader::new(path);
+        assert!(reader.exists());
+    }
+
+    #[test]
+    fn test_reader_exists_false() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("nonexistent.jsonl");
+
+        let reader: JsonlReader<TestEntity> = JsonlReader::new(path);
+        assert!(!reader.exists());
+    }
+
+    #[test]
+    fn test_jsonl_iterator() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("iter.jsonl");
+
+        let writer: JsonlWriter<TestEntity> = JsonlWriter::new(path.clone());
+        writer
+            .write_all(&[
+                TestEntity {
+                    id: "1".to_string(),
+                    name: "A".to_string(),
+                    value: 10,
+                },
+                TestEntity {
+                    id: "2".to_string(),
+                    name: "B".to_string(),
+                    value: 20,
+                },
+            ])
+            .unwrap();
+
+        let reader: JsonlReader<TestEntity> = JsonlReader::new(path);
+        let items: Vec<TestEntity> = reader.iter().unwrap().filter_map(|r| r.ok()).collect();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "A");
+    }
+
+    #[test]
+    fn test_iterator_skips_empty_lines() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("empty_lines.jsonl");
+
+        std::fs::write(
+            &path,
+            r#"{"id":"1","name":"A","value":1}
+
+{"id":"2","name":"B","value":2}
+"#,
+        )
+        .unwrap();
+
+        let reader: JsonlReader<TestEntity> = JsonlReader::new(path);
+        let items: Vec<TestEntity> = reader.iter().unwrap().filter_map(|r| r.ok()).collect();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn test_entity_path_construction() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = test_config(&temp_dir);
+
+        let path = entity_path(&config, EntityType::Placement, "epoch-001");
+        assert!(path.ends_with("epoch-001/placements.jsonl"));
+    }
+
+    #[test]
+    fn test_read_significant_events_empty() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = test_config(&temp_dir);
+
+        let events = read_significant_events(&config).unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_write_and_read_significant_events() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = test_config(&temp_dir);
+
+        let mut events = vec![
+            crate::models::SignificantEvent::new(
+                crate::models::SignificantEventType::BalanceUpdate,
+                chrono::NaiveDate::from_ymd_opt(2025, 9, 15).unwrap(),
+                "September Update".to_string(),
+                "https://example.com".to_string(),
+            ),
+            crate::models::SignificantEvent::new(
+                crate::models::SignificantEventType::BalanceUpdate,
+                chrono::NaiveDate::from_ymd_opt(2025, 3, 15).unwrap(),
+                "March Update".to_string(),
+                "https://example.com".to_string(),
+            ),
+        ];
+
+        write_significant_events(&config, &mut events).unwrap();
+
+        let read = read_significant_events(&config).unwrap();
+        assert_eq!(read.len(), 2);
+        // Should be sorted by date
+        assert!(read[0].date <= read[1].date);
+    }
+
+    #[test]
+    fn test_list_epochs_empty_dir() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = test_config(&temp_dir);
+        // normalized dir doesn't exist yet
+        let epochs = list_epochs(&config).unwrap();
+        assert!(epochs.is_empty());
+    }
+
+    #[test]
+    fn test_count_nonexistent_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("nonexistent.jsonl");
+        let reader: JsonlReader<TestEntity> = JsonlReader::new(path);
+        assert_eq!(reader.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_entity_type_all_filenames() {
+        assert_eq!(
+            EntityType::SignificantEvent.filename(),
+            "significant_events.jsonl"
+        );
+        assert_eq!(EntityType::ReviewItem.filename(), "review_items.jsonl");
+    }
 }

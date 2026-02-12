@@ -31,18 +31,18 @@ runs:
 
     - name: Generate coverage report
       shell: bash
-      run: cargo llvm-cov ${{ inputs.features }} --workspace --lcov --output-path lcov.info
+      run: cargo llvm-cov ${{ inputs.features }} --workspace --ignore-filename-regex='main\.rs' --lcov --output-path lcov.info
 
     - name: Generate HTML report
       shell: bash
-      run: cargo llvm-cov ${{ inputs.features }} --workspace --html --output-dir coverage-html
+      run: cargo llvm-cov ${{ inputs.features }} --workspace --ignore-filename-regex='main\.rs' --html --output-dir coverage-html
 
     - name: Check coverage threshold
       id: coverage
       shell: bash
       run: |
         # Get coverage percentage
-        COVERAGE_OUTPUT=$(cargo llvm-cov ${{ inputs.features }} --workspace 2>&1)
+        COVERAGE_OUTPUT=$(cargo llvm-cov ${{ inputs.features }} --workspace --ignore-filename-regex='main\.rs' 2>&1)
         echo "$COVERAGE_OUTPUT" | tee coverage-output.txt
 
         # Extract the total line coverage percentage

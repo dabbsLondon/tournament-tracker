@@ -419,4 +419,63 @@ mod tests {
         let agent = ResultHarvesterAgent::new(backend);
         assert_eq!(agent.name(), "result_harvester");
     }
+
+    #[test]
+    fn test_placement_stub_serialization() {
+        let stub = PlacementStub {
+            rank: 1,
+            player_name: "Test Player".to_string(),
+            faction: "Aeldari".to_string(),
+            subfaction: Some("Ynnari".to_string()),
+            detachment: Some("Battle Host".to_string()),
+            record: Some(WinLossRecord {
+                wins: 5,
+                losses: 0,
+                draws: 0,
+            }),
+            battle_points: Some(94),
+        };
+
+        let json = serde_json::to_string(&stub).unwrap();
+        let parsed: PlacementStub = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.rank, 1);
+        assert_eq!(parsed.battle_points, Some(94));
+    }
+
+    #[test]
+    fn test_win_loss_record_serialization() {
+        let record = WinLossRecord {
+            wins: 4,
+            losses: 1,
+            draws: 0,
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: WinLossRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.wins, 4);
+        assert_eq!(parsed.losses, 1);
+    }
+
+    #[test]
+    fn test_result_harvester_parse_response() {
+        let backend: Arc<dyn AiBackend> = Arc::new(MockBackend::new("{}"));
+        let agent = ResultHarvesterAgent::new(backend);
+
+        let output = agent.parse_response(mock_response()).unwrap();
+        assert_eq!(output.placements.len(), 2);
+        assert_eq!(output.raw_lists.len(), 1);
+        assert_eq!(output.placements[0].data.player_name, "John Smith");
+    }
+
+    #[test]
+    fn test_raw_list_text_serialization() {
+        let raw_list = RawListText {
+            placement_rank: 1,
+            player_name: "Test".to_string(),
+            text: "++ Army List ++".to_string(),
+        };
+
+        let json = serde_json::to_string(&raw_list).unwrap();
+        let parsed: RawListText = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.placement_rank, 1);
+    }
 }

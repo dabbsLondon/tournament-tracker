@@ -434,4 +434,77 @@ mod tests {
         assert_eq!(stats.epoch_id, deserialized.epoch_id);
         assert_eq!(stats.totals.events, deserialized.totals.events);
     }
+
+    #[test]
+    fn test_placement_counts_default() {
+        let counts = PlacementCounts::default();
+        assert_eq!(counts.first, 0);
+        assert_eq!(counts.top_4, 0);
+        assert_eq!(counts.top_10, 0);
+        assert_eq!(counts.top_half, 0);
+    }
+
+    #[test]
+    fn test_faction_stat_with_win_rate_delta() {
+        let stat = FactionStat::new(
+            "Test".to_string(),
+            50,
+            150,
+            5,
+            90,
+            50,
+            10,
+            PlacementCounts::default(),
+            500,
+            40,
+        )
+        .with_win_rate_delta(0.05);
+        assert_eq!(stat.win_rate_delta, Some(0.05));
+    }
+
+    #[test]
+    fn test_faction_stats_in_tier() {
+        let stats = FactionStats::new(
+            "epoch-test".into(),
+            "Test".to_string(),
+            DateRange {
+                from: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+                to: NaiveDate::from_ymd_opt(2025, 6, 30).unwrap(),
+            },
+            EpochTotals::default(),
+            vec![
+                FactionStat::new(
+                    "S-Tier".to_string(),
+                    100,
+                    300,
+                    10,
+                    200,
+                    90,
+                    10,
+                    PlacementCounts::default(),
+                    500,
+                    40,
+                ),
+                FactionStat::new(
+                    "D-Tier".to_string(),
+                    100,
+                    300,
+                    10,
+                    50,
+                    240,
+                    10,
+                    PlacementCounts::default(),
+                    500,
+                    40,
+                ),
+            ],
+        );
+
+        let s_tier = stats.in_tier(Tier::S);
+        let d_tier = stats.in_tier(Tier::D);
+        assert_eq!(s_tier.len(), 1);
+        assert_eq!(s_tier[0].name, "S-Tier");
+        assert_eq!(d_tier.len(), 1);
+        assert_eq!(d_tier[0].name, "D-Tier");
+    }
 }

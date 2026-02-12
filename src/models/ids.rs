@@ -133,4 +133,32 @@ mod tests {
         let id = EntityId::new("abc123def456".to_string());
         assert_eq!(format!("{}", id), "abc123def456");
     }
+
+    #[test]
+    fn test_entity_id_from_string() {
+        let id = EntityId::from("test-id".to_string());
+        assert_eq!(id.as_str(), "test-id");
+    }
+
+    #[test]
+    fn test_entity_id_from_str() {
+        let id = EntityId::from("another-id");
+        assert_eq!(id.as_str(), "another-id");
+    }
+
+    #[test]
+    fn test_entity_id_debug() {
+        let id = EntityId::new("debug-test".to_string());
+        let debug_str = format!("{:?}", id);
+        assert!(debug_str.contains("debug-test"));
+    }
+
+    #[test]
+    fn test_entity_id_equality() {
+        let id1 = EntityId::from("same");
+        let id2 = EntityId::from("same");
+        let id3 = EntityId::from("different");
+        assert_eq!(id1, id2);
+        assert_ne!(id1, id3);
+    }
 }
