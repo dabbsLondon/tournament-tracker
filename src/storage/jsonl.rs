@@ -304,7 +304,7 @@ pub fn read_significant_events(
 /// Write significant events to the global file, sorted by date.
 pub fn write_significant_events(
     config: &StorageConfig,
-    events: &mut Vec<crate::models::SignificantEvent>,
+    events: &mut [crate::models::SignificantEvent],
 ) -> Result<usize, StorageError> {
     events.sort_by_key(|e| e.date);
     let writer = JsonlWriter::new(config.significant_events_path());

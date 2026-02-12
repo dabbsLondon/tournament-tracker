@@ -100,7 +100,7 @@ pub async fn faction_stats(
                 let event_date = event_dates.get(p.event_id.as_str());
                 match event_date {
                     Some(d) => {
-                        from_date.map_or(true, |f| *d >= f) && to_date.map_or(true, |t| *d <= t)
+                        from_date.is_none_or(|f| *d >= f) && to_date.is_none_or(|t| *d <= t)
                     }
                     None => true,
                 }
@@ -368,7 +368,7 @@ pub async fn faction_detail(
         if let Some(list) = matched_list {
             claimed_list_ids.insert(list.id.as_str().to_string());
         }
-        let army_list = matched_list.map(|l| army_list_to_detail(l));
+        let army_list = matched_list.map(army_list_to_detail);
 
         winners.push(FactionWinner {
             rank: p.rank,

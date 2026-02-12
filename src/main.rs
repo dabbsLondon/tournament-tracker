@@ -539,7 +539,7 @@ async fn main() -> Result<()> {
             // Normalize the faction filter for comparison
             let faction_filter = faction
                 .as_deref()
-                .map(|f| meta_agent::api::routes::events::normalize_faction_name(f));
+                .map(meta_agent::api::routes::events::normalize_faction_name);
 
             // Determine which lists to process
             let indices: Vec<usize> = lists
