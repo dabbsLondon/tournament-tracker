@@ -64,10 +64,7 @@ pub async fn overview(
             epochs.iter().map(|e| e.id.as_str().to_string()).collect()
         }
     } else {
-        vec![crate::api::resolve_epoch(
-            params.epoch.as_deref(),
-            mapper,
-        )?]
+        vec![crate::api::resolve_epoch(params.epoch.as_deref(), mapper)?]
     };
 
     let mut all_placements: Vec<Placement> = Vec::new();
@@ -122,13 +119,14 @@ pub async fn overview(
         }
     }
 
-    let most_popular_faction = faction_counts
-        .iter()
-        .max_by_key(|(_, c)| *c)
-        .map(|(name, count)| FactionHighlight {
-            name: name.clone(),
-            count: *count,
-        });
+    let most_popular_faction =
+        faction_counts
+            .iter()
+            .max_by_key(|(_, c)| *c)
+            .map(|(name, count)| FactionHighlight {
+                name: name.clone(),
+                count: *count,
+            });
 
     let min_count_threshold = 10u32;
     let highest_win_rate_faction = faction_counts
@@ -278,7 +276,11 @@ pub async fn faction_trends(
         // Top 10 by global count
         let mut sorted: Vec<_> = global_faction_counts.iter().collect();
         sorted.sort_by(|a, b| b.1.cmp(a.1));
-        sorted.into_iter().take(10).map(|(f, _)| f.clone()).collect()
+        sorted
+            .into_iter()
+            .take(10)
+            .map(|(f, _)| f.clone())
+            .collect()
     };
 
     // Compute epoch totals
@@ -294,9 +296,7 @@ pub async fn faction_trends(
     // Build faction trends
     let mut faction_trends: Vec<FactionTrend> = Vec::new();
     for faction in &target_factions {
-        let allegiance = faction_allegiance(faction)
-            .unwrap_or("Unknown")
-            .to_string();
+        let allegiance = faction_allegiance(faction).unwrap_or("Unknown").to_string();
         let stats = faction_epoch_stats.get(faction);
         let data_points: Vec<TrendDataPoint> = epoch_infos
             .iter()
@@ -402,10 +402,7 @@ pub async fn top_players(
             epochs.iter().map(|e| e.id.as_str().to_string()).collect()
         }
     } else {
-        vec![crate::api::resolve_epoch(
-            params.epoch.as_deref(),
-            mapper,
-        )?]
+        vec![crate::api::resolve_epoch(params.epoch.as_deref(), mapper)?]
     };
 
     let mut all_placements: Vec<Placement> = Vec::new();
@@ -479,8 +476,16 @@ pub async fn top_players(
                 return None;
             }
 
-            let total_wins = data.placements.iter().filter(|(p, _, _)| p.rank == 1).count() as u32;
-            let total_top4 = data.placements.iter().filter(|(p, _, _)| p.rank <= 4).count() as u32;
+            let total_wins = data
+                .placements
+                .iter()
+                .filter(|(p, _, _)| p.rank == 1)
+                .count() as u32;
+            let total_top4 = data
+                .placements
+                .iter()
+                .filter(|(p, _, _)| p.rank <= 4)
+                .count() as u32;
             let win_rate = if total_events > 0 {
                 (total_wins as f64 / total_events as f64) * 100.0
             } else {
@@ -600,10 +605,7 @@ pub async fn top_units(
             epochs.iter().map(|e| e.id.as_str().to_string()).collect()
         }
     } else {
-        vec![crate::api::resolve_epoch(
-            params.epoch.as_deref(),
-            mapper,
-        )?]
+        vec![crate::api::resolve_epoch(params.epoch.as_deref(), mapper)?]
     };
 
     let mut all_lists: Vec<ArmyList> = Vec::new();
@@ -726,10 +728,16 @@ pub async fn top_units(
         .collect();
 
     // Build per-faction breakdowns (top 5 factions by list count, top 10 units each)
-    let mut faction_list_counts: Vec<_> = faction_units.keys().map(|f| {
-        let count = all_lists.iter().filter(|l| normalize_faction_name(&l.faction) == *f).count();
-        (f.clone(), count)
-    }).collect();
+    let mut faction_list_counts: Vec<_> = faction_units
+        .keys()
+        .map(|f| {
+            let count = all_lists
+                .iter()
+                .filter(|l| normalize_faction_name(&l.faction) == *f)
+                .count();
+            (f.clone(), count)
+        })
+        .collect();
     faction_list_counts.sort_by(|a, b| b.1.cmp(&a.1));
 
     let faction_breakdowns: Vec<FactionUnitBreakdown> = faction_list_counts
@@ -744,9 +752,7 @@ pub async fn top_units(
                 .take(10)
                 .map(|(name, agg)| to_unit_stat(name, agg))
                 .collect();
-            let allegiance = faction_allegiance(faction)
-                .unwrap_or("Unknown")
-                .to_string();
+            let allegiance = faction_allegiance(faction).unwrap_or("Unknown").to_string();
             Some(FactionUnitBreakdown {
                 faction: faction.clone(),
                 allegiance,

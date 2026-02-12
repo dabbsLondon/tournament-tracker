@@ -32,61 +32,418 @@ pub struct ResolvedFaction {
 static FACTION_MAP: LazyLock<HashMap<&'static str, FactionInfo>> = LazyLock::new(|| {
     let entries: Vec<(&str, FactionInfo)> = vec![
         // Space Marines chapters (distinct factions with codex supplements)
-        ("space marines", FactionInfo { canonical_name: "Space Marines", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("blood angels", FactionInfo { canonical_name: "Blood Angels", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("dark angels", FactionInfo { canonical_name: "Dark Angels", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("space wolves", FactionInfo { canonical_name: "Space Wolves", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("black templars", FactionInfo { canonical_name: "Black Templars", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("deathwatch", FactionInfo { canonical_name: "Deathwatch", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("grey knights", FactionInfo { canonical_name: "Grey Knights", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        (
+            "space marines",
+            FactionInfo {
+                canonical_name: "Space Marines",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "blood angels",
+            FactionInfo {
+                canonical_name: "Blood Angels",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "dark angels",
+            FactionInfo {
+                canonical_name: "Dark Angels",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "space wolves",
+            FactionInfo {
+                canonical_name: "Space Wolves",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "black templars",
+            FactionInfo {
+                canonical_name: "Black Templars",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "deathwatch",
+            FactionInfo {
+                canonical_name: "Deathwatch",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "grey knights",
+            FactionInfo {
+                canonical_name: "Grey Knights",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
         // Other chapters → each is its own faction
-        ("adeptus astartes", FactionInfo { canonical_name: "Space Marines", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("ultramarines", FactionInfo { canonical_name: "Ultramarines", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("iron hands", FactionInfo { canonical_name: "Iron Hands", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("raven guard", FactionInfo { canonical_name: "Raven Guard", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("salamanders", FactionInfo { canonical_name: "Salamanders", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("imperial fists", FactionInfo { canonical_name: "Imperial Fists", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("white scars", FactionInfo { canonical_name: "White Scars", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("crimson fists", FactionInfo { canonical_name: "Crimson Fists", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("black dragons", FactionInfo { canonical_name: "Black Dragons", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
-        ("flesh tearers", FactionInfo { canonical_name: "Flesh Tearers", allegiance: "Imperium", allegiance_sub: "Space Marines" }),
+        (
+            "adeptus astartes",
+            FactionInfo {
+                canonical_name: "Space Marines",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "ultramarines",
+            FactionInfo {
+                canonical_name: "Ultramarines",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "iron hands",
+            FactionInfo {
+                canonical_name: "Iron Hands",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "raven guard",
+            FactionInfo {
+                canonical_name: "Raven Guard",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "salamanders",
+            FactionInfo {
+                canonical_name: "Salamanders",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "imperial fists",
+            FactionInfo {
+                canonical_name: "Imperial Fists",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "white scars",
+            FactionInfo {
+                canonical_name: "White Scars",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "crimson fists",
+            FactionInfo {
+                canonical_name: "Crimson Fists",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "black dragons",
+            FactionInfo {
+                canonical_name: "Black Dragons",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
+        (
+            "flesh tearers",
+            FactionInfo {
+                canonical_name: "Flesh Tearers",
+                allegiance: "Imperium",
+                allegiance_sub: "Space Marines",
+            },
+        ),
         // Armies of the Imperium
-        ("adepta sororitas", FactionInfo { canonical_name: "Adepta Sororitas", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
-        ("sisters of battle", FactionInfo { canonical_name: "Adepta Sororitas", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
-        ("adeptus custodes", FactionInfo { canonical_name: "Adeptus Custodes", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
-        ("adeptus mechanicus", FactionInfo { canonical_name: "Adeptus Mechanicus", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
-        ("astra militarum", FactionInfo { canonical_name: "Astra Militarum", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
-        ("imperial guard", FactionInfo { canonical_name: "Astra Militarum", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
-        ("imperial knights", FactionInfo { canonical_name: "Imperial Knights", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
-        ("agents of the imperium", FactionInfo { canonical_name: "Agents of the Imperium", allegiance: "Imperium", allegiance_sub: "Armies of the Imperium" }),
+        (
+            "adepta sororitas",
+            FactionInfo {
+                canonical_name: "Adepta Sororitas",
+                allegiance: "Imperium",
+                allegiance_sub: "Armies of the Imperium",
+            },
+        ),
+        (
+            "sisters of battle",
+            FactionInfo {
+                canonical_name: "Adepta Sororitas",
+                allegiance: "Imperium",
+                allegiance_sub: "Armies of the Imperium",
+            },
+        ),
+        (
+            "adeptus custodes",
+            FactionInfo {
+                canonical_name: "Adeptus Custodes",
+                allegiance: "Imperium",
+                allegiance_sub: "Armies of the Imperium",
+            },
+        ),
+        (
+            "adeptus mechanicus",
+            FactionInfo {
+                canonical_name: "Adeptus Mechanicus",
+                allegiance: "Imperium",
+                allegiance_sub: "Armies of the Imperium",
+            },
+        ),
+        (
+            "astra militarum",
+            FactionInfo {
+                canonical_name: "Astra Militarum",
+                allegiance: "Imperium",
+                allegiance_sub: "Armies of the Imperium",
+            },
+        ),
+        (
+            "imperial guard",
+            FactionInfo {
+                canonical_name: "Astra Militarum",
+                allegiance: "Imperium",
+                allegiance_sub: "Armies of the Imperium",
+            },
+        ),
+        (
+            "imperial knights",
+            FactionInfo {
+                canonical_name: "Imperial Knights",
+                allegiance: "Imperium",
+                allegiance_sub: "Armies of the Imperium",
+            },
+        ),
+        (
+            "agents of the imperium",
+            FactionInfo {
+                canonical_name: "Agents of the Imperium",
+                allegiance: "Imperium",
+                allegiance_sub: "Armies of the Imperium",
+            },
+        ),
         // Forces of Chaos
-        ("chaos space marines", FactionInfo { canonical_name: "Chaos Space Marines", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
-        ("death guard", FactionInfo { canonical_name: "Death Guard", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
-        ("thousand sons", FactionInfo { canonical_name: "Thousand Sons", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
-        ("chaos thousand sons", FactionInfo { canonical_name: "Thousand Sons", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
-        ("world eaters", FactionInfo { canonical_name: "World Eaters", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
-        ("emperor's children", FactionInfo { canonical_name: "Emperor's Children", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
-        ("chaos daemons", FactionInfo { canonical_name: "Chaos Daemons", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
-        ("daemons of chaos", FactionInfo { canonical_name: "Chaos Daemons", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
-        ("chaos knights", FactionInfo { canonical_name: "Chaos Knights", allegiance: "Chaos", allegiance_sub: "Forces of Chaos" }),
+        (
+            "chaos space marines",
+            FactionInfo {
+                canonical_name: "Chaos Space Marines",
+                allegiance: "Chaos",
+                allegiance_sub: "Forces of Chaos",
+            },
+        ),
+        (
+            "death guard",
+            FactionInfo {
+                canonical_name: "Death Guard",
+                allegiance: "Chaos",
+                allegiance_sub: "Forces of Chaos",
+            },
+        ),
+        (
+            "thousand sons",
+            FactionInfo {
+                canonical_name: "Thousand Sons",
+                allegiance: "Chaos",
+                allegiance_sub: "Forces of Chaos",
+            },
+        ),
+        (
+            "chaos thousand sons",
+            FactionInfo {
+                canonical_name: "Thousand Sons",
+                allegiance: "Chaos",
+                allegiance_sub: "Forces of Chaos",
+            },
+        ),
+        (
+            "world eaters",
+            FactionInfo {
+                canonical_name: "World Eaters",
+                allegiance: "Chaos",
+                allegiance_sub: "Forces of Chaos",
+            },
+        ),
+        (
+            "emperor's children",
+            FactionInfo {
+                canonical_name: "Emperor's Children",
+                allegiance: "Chaos",
+                allegiance_sub: "Forces of Chaos",
+            },
+        ),
+        (
+            "chaos daemons",
+            FactionInfo {
+                canonical_name: "Chaos Daemons",
+                allegiance: "Chaos",
+                allegiance_sub: "Forces of Chaos",
+            },
+        ),
+        (
+            "daemons of chaos",
+            FactionInfo {
+                canonical_name: "Chaos Daemons",
+                allegiance: "Chaos",
+                allegiance_sub: "Forces of Chaos",
+            },
+        ),
+        (
+            "chaos knights",
+            FactionInfo {
+                canonical_name: "Chaos Knights",
+                allegiance: "Chaos",
+                allegiance_sub: "Forces of Chaos",
+            },
+        ),
         // Xenos
-        ("aeldari", FactionInfo { canonical_name: "Aeldari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("craftworlds", FactionInfo { canonical_name: "Aeldari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("craftworld", FactionInfo { canonical_name: "Aeldari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("harlequins", FactionInfo { canonical_name: "Aeldari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("drukhari", FactionInfo { canonical_name: "Drukhari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("dark eldar", FactionInfo { canonical_name: "Drukhari", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("tyranids", FactionInfo { canonical_name: "Tyranids", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("genestealer cults", FactionInfo { canonical_name: "Genestealer Cults", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("genestealer cult", FactionInfo { canonical_name: "Genestealer Cults", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("leagues of votann", FactionInfo { canonical_name: "Leagues of Votann", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("votann", FactionInfo { canonical_name: "Leagues of Votann", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("necrons", FactionInfo { canonical_name: "Necrons", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("orks", FactionInfo { canonical_name: "Orks", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("t'au empire", FactionInfo { canonical_name: "T'au Empire", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("t'au", FactionInfo { canonical_name: "T'au Empire", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("tau", FactionInfo { canonical_name: "T'au Empire", allegiance: "Xenos", allegiance_sub: "Xenos" }),
-        ("tau empire", FactionInfo { canonical_name: "T'au Empire", allegiance: "Xenos", allegiance_sub: "Xenos" }),
+        (
+            "aeldari",
+            FactionInfo {
+                canonical_name: "Aeldari",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "craftworlds",
+            FactionInfo {
+                canonical_name: "Aeldari",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "craftworld",
+            FactionInfo {
+                canonical_name: "Aeldari",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "harlequins",
+            FactionInfo {
+                canonical_name: "Aeldari",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "drukhari",
+            FactionInfo {
+                canonical_name: "Drukhari",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "dark eldar",
+            FactionInfo {
+                canonical_name: "Drukhari",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "tyranids",
+            FactionInfo {
+                canonical_name: "Tyranids",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "genestealer cults",
+            FactionInfo {
+                canonical_name: "Genestealer Cults",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "genestealer cult",
+            FactionInfo {
+                canonical_name: "Genestealer Cults",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "leagues of votann",
+            FactionInfo {
+                canonical_name: "Leagues of Votann",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "votann",
+            FactionInfo {
+                canonical_name: "Leagues of Votann",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "necrons",
+            FactionInfo {
+                canonical_name: "Necrons",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "orks",
+            FactionInfo {
+                canonical_name: "Orks",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "t'au empire",
+            FactionInfo {
+                canonical_name: "T'au Empire",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "t'au",
+            FactionInfo {
+                canonical_name: "T'au Empire",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "tau",
+            FactionInfo {
+                canonical_name: "T'au Empire",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
+        (
+            "tau empire",
+            FactionInfo {
+                canonical_name: "T'au Empire",
+                allegiance: "Xenos",
+                allegiance_sub: "Xenos",
+            },
+        ),
     ];
     entries.into_iter().collect()
 });
@@ -95,10 +452,20 @@ static FACTION_MAP: LazyLock<HashMap<&'static str, FactionInfo>> = LazyLock::new
 /// When faction is "Space Marines" and subfaction matches one of these,
 /// the subfaction becomes the faction.
 const CHAPTER_FACTIONS: &[&str] = &[
-    "Blood Angels", "Dark Angels", "Space Wolves",
-    "Black Templars", "Deathwatch", "Grey Knights",
-    "Ultramarines", "Iron Hands", "Raven Guard", "Salamanders",
-    "Imperial Fists", "White Scars", "Crimson Fists", "Black Dragons",
+    "Blood Angels",
+    "Dark Angels",
+    "Space Wolves",
+    "Black Templars",
+    "Deathwatch",
+    "Grey Knights",
+    "Ultramarines",
+    "Iron Hands",
+    "Raven Guard",
+    "Salamanders",
+    "Imperial Fists",
+    "White Scars",
+    "Crimson Fists",
+    "Black Dragons",
     "Flesh Tearers",
 ];
 
@@ -127,7 +494,10 @@ pub fn resolve_faction(faction: &str, subfaction: Option<&str>) -> ResolvedFacti
     if let Some(sub) = subfaction {
         let sub_lower = sub.trim().to_lowercase();
         // Check if subfaction is a codex-supplement chapter
-        if CHAPTER_FACTIONS.iter().any(|c| c.to_lowercase() == sub_lower) {
+        if CHAPTER_FACTIONS
+            .iter()
+            .any(|c| c.to_lowercase() == sub_lower)
+        {
             if let Some(info) = FACTION_MAP.get(sub_lower.as_str()) {
                 return ResolvedFaction {
                     faction: info.canonical_name.to_string(),
@@ -237,17 +607,17 @@ pub async fn list_events(
     // Filter to only events that have at least one placement (results)
     // Also exclude future events — they can't have legitimate results
     if params.has_results.unwrap_or(false) {
-        events.retain(|e| {
-            event_ids_with_placements.contains(e.id.as_str()) && e.date <= today
-        });
+        events.retain(|e| event_ids_with_placements.contains(e.id.as_str()) && e.date <= today);
     }
 
     // Read army lists to determine which events have lists
     let list_reader =
         JsonlReader::<ArmyList>::for_entity(&state.storage, EntityType::ArmyList, &epoch);
     let lists = list_reader.read_all().unwrap_or_default();
-    let urls_with_lists: std::collections::HashSet<&str> =
-        lists.iter().filter_map(|l| l.source_url.as_deref()).collect();
+    let urls_with_lists: std::collections::HashSet<&str> = lists
+        .iter()
+        .filter_map(|l| l.source_url.as_deref())
+        .collect();
 
     let pagination = Pagination::new(params.page, params.page_size);
     let total_items = events.len() as u32;
@@ -273,8 +643,8 @@ pub async fn list_events(
                     detachment: p.detachment.clone(),
                 });
 
-            let completed = event.date <= today
-                && event_ids_with_placements.contains(event.id.as_str());
+            let completed =
+                event.date <= today && event_ids_with_placements.contains(event.id.as_str());
 
             EventSummary {
                 id: event.id.as_str().to_string(),
@@ -365,15 +735,35 @@ pub fn parse_faction_from_raw(raw: &str) -> Option<String> {
     }
     // Fallback: look for known faction names in first ~10 non-empty, non-header lines
     let factions = [
-        "Astra Militarum", "Space Marines", "Necrons", "T'au Empire",
-        "Aeldari", "Drukhari", "Blood Angels", "Dark Angels",
-        "Death Guard", "Thousand Sons", "Chaos Space Marines",
-        "Chaos Daemons", "Adeptus Custodes", "Adepta Sororitas",
-        "Grey Knights", "Orks", "Tyranids", "Genestealer Cults",
-        "Imperial Knights", "Chaos Knights", "Adeptus Mechanicus",
-        "World Eaters", "Leagues of Votann", "Emperor's Children",
-        "Agents of the Imperium", "Black Templars", "Space Wolves",
-        "Ultramarines", "Raven Guard",
+        "Astra Militarum",
+        "Space Marines",
+        "Necrons",
+        "T'au Empire",
+        "Aeldari",
+        "Drukhari",
+        "Blood Angels",
+        "Dark Angels",
+        "Death Guard",
+        "Thousand Sons",
+        "Chaos Space Marines",
+        "Chaos Daemons",
+        "Adeptus Custodes",
+        "Adepta Sororitas",
+        "Grey Knights",
+        "Orks",
+        "Tyranids",
+        "Genestealer Cults",
+        "Imperial Knights",
+        "Chaos Knights",
+        "Adeptus Mechanicus",
+        "World Eaters",
+        "Leagues of Votann",
+        "Emperor's Children",
+        "Agents of the Imperium",
+        "Black Templars",
+        "Space Wolves",
+        "Ultramarines",
+        "Raven Guard",
     ];
     for line in raw.lines().take(15) {
         let line = line.trim();
@@ -646,11 +1036,20 @@ mod tests {
 
     #[test]
     fn test_normalize_faction_name() {
-        assert_eq!(normalize_faction_name("Genestealer Cult"), "Genestealer Cults");
-        assert_eq!(normalize_faction_name("Genestealer Cults"), "Genestealer Cults");
+        assert_eq!(
+            normalize_faction_name("Genestealer Cult"),
+            "Genestealer Cults"
+        );
+        assert_eq!(
+            normalize_faction_name("Genestealer Cults"),
+            "Genestealer Cults"
+        );
         assert_eq!(normalize_faction_name("Adeptus Astartes"), "Space Marines");
         assert_eq!(normalize_faction_name("Space Marines"), "Space Marines");
-        assert_eq!(normalize_faction_name("Chaos Space Marines"), "Chaos Space Marines");
+        assert_eq!(
+            normalize_faction_name("Chaos Space Marines"),
+            "Chaos Space Marines"
+        );
         assert_eq!(normalize_faction_name("T'au Empire"), "T'au Empire");
         assert_eq!(normalize_faction_name("tau empire"), "T'au Empire");
         assert_eq!(normalize_faction_name("Blood Angels"), "Blood Angels");
@@ -707,14 +1106,23 @@ mod tests {
         assert_eq!(faction_match_score("space marines", "Space Marines"), 3);
         // Adeptus Astartes normalizes to Space Marines
         assert_eq!(faction_match_score("Adeptus Astartes", "Space Marines"), 3);
-        assert_eq!(faction_match_score("Genestealer Cult", "Genestealer Cults"), 3);
+        assert_eq!(
+            faction_match_score("Genestealer Cult", "Genestealer Cults"),
+            3
+        );
     }
 
     #[test]
     fn test_faction_match_score_no_cross_contamination() {
         // Chaos Space Marines must NOT match Space Marines
-        assert_eq!(faction_match_score("Chaos Space Marines", "Space Marines"), 0);
-        assert_eq!(faction_match_score("Space Marines", "Chaos Space Marines"), 0);
+        assert_eq!(
+            faction_match_score("Chaos Space Marines", "Space Marines"),
+            0
+        );
+        assert_eq!(
+            faction_match_score("Space Marines", "Chaos Space Marines"),
+            0
+        );
         // Chaos Knights must NOT match Imperial Knights
         assert_eq!(faction_match_score("Chaos Knights", "Imperial Knights"), 0);
     }

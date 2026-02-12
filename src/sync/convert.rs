@@ -117,7 +117,13 @@ mod tests {
             Some(96),
         );
 
-        let event = event_from_stub(&stub, "https://goonhammer.com/article", article_date, "goonhammer", None);
+        let event = event_from_stub(
+            &stub,
+            "https://goonhammer.com/article",
+            article_date,
+            "goonhammer",
+            None,
+        );
 
         assert_eq!(event.name, "London GT 2025");
         assert_eq!(event.date, event_date); // Uses stub date, not article date
@@ -133,7 +139,13 @@ mod tests {
         let article_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
         let stub = make_event_stub("Unknown Event", None, None, None);
 
-        let event = event_from_stub(&stub, "https://goonhammer.com/article", article_date, "goonhammer", None);
+        let event = event_from_stub(
+            &stub,
+            "https://goonhammer.com/article",
+            article_date,
+            "goonhammer",
+            None,
+        );
 
         assert_eq!(event.date, article_date); // Falls back to article date
         assert!(event.location.is_none());

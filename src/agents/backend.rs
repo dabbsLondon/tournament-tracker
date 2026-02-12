@@ -518,17 +518,22 @@ impl AiBackend for AnthropicBackend {
                     break;
                 }
                 Err(e) => {
-                    warn!("Failed to parse Anthropic response: {}. Body: {}",
-                        e, &body_text[..body_text.len().min(500)]);
+                    warn!(
+                        "Failed to parse Anthropic response: {}. Body: {}",
+                        e,
+                        &body_text[..body_text.len().min(500)]
+                    );
                     return Err(AgentError::ResponseParseError(format!(
-                        "Invalid JSON from Anthropic: {}", e
+                        "Invalid JSON from Anthropic: {}",
+                        e
                     )));
                 }
             }
         }
 
-        let anthropic_response = anthropic_response
-            .ok_or_else(|| AgentError::BackendUnavailable("No response after retries".to_string()))?;
+        let anthropic_response = anthropic_response.ok_or_else(|| {
+            AgentError::BackendUnavailable("No response after retries".to_string())
+        })?;
 
         let content = anthropic_response
             .content

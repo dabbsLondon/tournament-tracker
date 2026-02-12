@@ -75,7 +75,8 @@ pub enum SyncSource {
 impl Default for SyncSource {
     fn default() -> Self {
         SyncSource::Goonhammer {
-            base_url: "https://www.goonhammer.com/category/columns/40k-competitive-innovations/".to_string(),
+            base_url: "https://www.goonhammer.com/category/columns/40k-competitive-innovations/"
+                .to_string(),
         }
     }
 }
@@ -191,7 +192,10 @@ impl SyncOrchestrator {
         // Load epoch mapper from stored significant events (empty = backward-compat)
         let epoch_mapper = match read_significant_events(&config.storage) {
             Ok(events) if !events.is_empty() => {
-                info!("Loaded {} significant events for epoch mapping", events.len());
+                info!(
+                    "Loaded {} significant events for epoch mapping",
+                    events.len()
+                );
                 EpochMapper::from_significant_events(&events)
             }
             _ => EpochMapper::new(),
@@ -244,8 +248,9 @@ impl SyncOrchestrator {
                 "https://www.goonhammer.com/wp-json/wp/v2/posts?slug={}",
                 slug
             );
-            let api_url = Url::parse(&api_url)
-                .map_err(|e| SyncError::Fetch(crate::fetch::FetchError::InvalidUrl(e.to_string())))?;
+            let api_url = Url::parse(&api_url).map_err(|e| {
+                SyncError::Fetch(crate::fetch::FetchError::InvalidUrl(e.to_string()))
+            })?;
 
             let fetch_result = self.fetcher.fetch(&api_url).await?;
             let json_text = self.fetcher.read_cached_text(&fetch_result).await?;
@@ -260,7 +265,9 @@ impl SyncOrchestrator {
                         let date = post
                             .get("date")
                             .and_then(|d| d.as_str())
-                            .and_then(|s| chrono::NaiveDate::parse_from_str(&s[..10], "%Y-%m-%d").ok())
+                            .and_then(|s| {
+                                chrono::NaiveDate::parse_from_str(&s[..10], "%Y-%m-%d").ok()
+                            })
                             .unwrap_or(article_date);
 
                         info!("Got article content via WP API ({} chars)", content.len());
@@ -372,8 +379,9 @@ impl SyncOrchestrator {
                     format!("{}/", base_url)
                 };
                 let rss_url = format!("{}feed/", base_with_slash);
-                let rss_url = Url::parse(&rss_url)
-                    .map_err(|e| SyncError::Fetch(crate::fetch::FetchError::InvalidUrl(e.to_string())))?;
+                let rss_url = Url::parse(&rss_url).map_err(|e| {
+                    SyncError::Fetch(crate::fetch::FetchError::InvalidUrl(e.to_string()))
+                })?;
 
                 let fetch_result = self.fetcher.fetch(&rss_url).await?;
                 let rss_xml = self.fetcher.read_cached_text(&fetch_result).await?;
@@ -458,8 +466,9 @@ impl SyncOrchestrator {
             SyncSource::WarhammerCommunity { url } => {
                 info!("Syncing balance updates from: {}", url);
 
-                let page_url = Url::parse(url)
-                    .map_err(|e| SyncError::Fetch(crate::fetch::FetchError::InvalidUrl(e.to_string())))?;
+                let page_url = Url::parse(url).map_err(|e| {
+                    SyncError::Fetch(crate::fetch::FetchError::InvalidUrl(e.to_string()))
+                })?;
 
                 // 1. Fetch page
                 let fetch_result = self.fetcher.fetch(&page_url).await?;
@@ -478,12 +487,10 @@ impl SyncOrchestrator {
 
                 // 3. Store SignificantEvent entities to global file
                 if !self.config.dry_run {
-                    let mut existing = read_significant_events(&self.config.storage)
-                        .unwrap_or_default();
-                    let existing_ids: std::collections::HashSet<String> = existing
-                        .iter()
-                        .map(|e| e.id.as_str().to_string())
-                        .collect();
+                    let mut existing =
+                        read_significant_events(&self.config.storage).unwrap_or_default();
+                    let existing_ids: std::collections::HashSet<String> =
+                        existing.iter().map(|e| e.id.as_str().to_string()).collect();
                     for event_output in &output.events {
                         if !existing_ids.contains(event_output.data.id.as_str()) {
                             existing.push(event_output.data.clone());
@@ -535,11 +542,7 @@ impl SyncOrchestrator {
             .unwrap_or("")
             .to_string();
 
-        info!(
-            "Fetched WP post {} ({} chars HTML)",
-            post_id,
-            content.len()
-        );
+        info!("Fetched WP post {} ({} chars HTML)", post_id, content.len());
 
         Ok(content)
     }
@@ -636,19 +639,13 @@ impl SyncOrchestrator {
                     continue;
                 }
 
-                let event_writer = JsonlWriter::for_entity(
-                    &self.config.storage,
-                    EntityType::Event,
-                    &epoch_str,
-                );
+                let event_writer =
+                    JsonlWriter::for_entity(&self.config.storage, EntityType::Event, &epoch_str);
                 event_writer.append(&event).map_err(SyncError::Storage)?;
             }
             total_events += 1;
 
-            info!(
-                "  Event: {} ({:?} players)",
-                event.name, event.player_count
-            );
+            info!("  Event: {} ({:?} players)", event.name, event.player_count);
 
             // 4. Run ResultHarvesterAgent for each event
             let harvester = ResultHarvesterAgent::new(self.backend.clone());
@@ -663,20 +660,21 @@ impl SyncOrchestrator {
                     total_lists += list_count;
 
                     // 5. Convert placements and store (with dedup)
-                    let existing_placement_ids: std::collections::HashSet<String> = if !self.config.dry_run {
-                        crate::storage::JsonlReader::<crate::models::Placement>::for_entity(
-                            &self.config.storage,
-                            EntityType::Placement,
-                            &epoch_str,
-                        )
-                        .read_all()
-                        .unwrap_or_default()
-                        .iter()
-                        .map(|p| p.id.as_str().to_string())
-                        .collect()
-                    } else {
-                        std::collections::HashSet::new()
-                    };
+                    let existing_placement_ids: std::collections::HashSet<String> =
+                        if !self.config.dry_run {
+                            crate::storage::JsonlReader::<crate::models::Placement>::for_entity(
+                                &self.config.storage,
+                                EntityType::Placement,
+                                &epoch_str,
+                            )
+                            .read_all()
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|p| p.id.as_str().to_string())
+                            .collect()
+                        } else {
+                            std::collections::HashSet::new()
+                        };
 
                     for placement_stub in &harvest_output.placements {
                         let placement = convert::placement_from_stub(
@@ -687,7 +685,10 @@ impl SyncOrchestrator {
 
                         if !self.config.dry_run {
                             if existing_placement_ids.contains(placement.id.as_str()) {
-                                info!("    Skipping duplicate placement: #{} {}", placement.rank, placement.player_name);
+                                info!(
+                                    "    Skipping duplicate placement: #{} {}",
+                                    placement.rank, placement.player_name
+                                );
                                 continue;
                             }
 
@@ -704,25 +705,28 @@ impl SyncOrchestrator {
                     }
 
                     // 6. Normalize and store army lists (with dedup)
-                    let existing_list_ids: std::collections::HashSet<String> = if !self.config.dry_run {
-                        crate::storage::JsonlReader::<ArmyList>::for_entity(
-                            &self.config.storage,
-                            EntityType::ArmyList,
-                            &epoch_str,
-                        )
-                        .read_all()
-                        .unwrap_or_default()
-                        .iter()
-                        .map(|l| l.id.as_str().to_string())
-                        .collect()
-                    } else {
-                        std::collections::HashSet::new()
-                    };
+                    let existing_list_ids: std::collections::HashSet<String> =
+                        if !self.config.dry_run {
+                            crate::storage::JsonlReader::<ArmyList>::for_entity(
+                                &self.config.storage,
+                                EntityType::ArmyList,
+                                &epoch_str,
+                            )
+                            .read_all()
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|l| l.id.as_str().to_string())
+                            .collect()
+                        } else {
+                            std::collections::HashSet::new()
+                        };
 
                     let normalizer = ListNormalizerAgent::new(self.backend.clone());
                     for (list_idx, raw_list) in harvest_output.raw_lists.iter().enumerate() {
                         // Find the matching placement to get the faction
-                        let faction = harvest_output.placements.iter()
+                        let faction = harvest_output
+                            .placements
+                            .iter()
                             .find(|p| p.data.rank == raw_list.placement_rank)
                             .map(|p| p.data.faction.clone())
                             .unwrap_or_default();
@@ -730,28 +734,55 @@ impl SyncOrchestrator {
                         // Try to normalize the list with AI
                         let norm_input = ListNormalizerInput {
                             raw_text: raw_list.text.clone(),
-                            faction_hint: if faction.is_empty() { None } else { Some(faction.clone()) },
+                            faction_hint: if faction.is_empty() {
+                                None
+                            } else {
+                                Some(faction.clone())
+                            },
                             player_name: raw_list.player_name.clone(),
                         };
 
-                        let (norm_faction, norm_detachment, norm_subfaction, norm_points, norm_units, norm_confidence) =
-                            match normalizer.execute(norm_input).await {
-                                Ok(output) => {
-                                    let d = output.list.data;
-                                    info!(
-                                        "    Normalized: {} - {} ({} units, {}pts)",
-                                        d.faction,
-                                        d.detachment.as_deref().unwrap_or("(none)"),
-                                        d.units.len(),
-                                        d.total_points,
-                                    );
-                                    (d.faction, d.detachment, d.subfaction, d.total_points, d.units, output.list.confidence)
-                                }
-                                Err(e) => {
-                                    warn!("    List normalization failed for {}: {}", raw_list.player_name, e);
-                                    (faction, None, None, 0, Vec::new(), crate::models::Confidence::Low)
-                                }
-                            };
+                        let (
+                            norm_faction,
+                            norm_detachment,
+                            norm_subfaction,
+                            norm_points,
+                            norm_units,
+                            norm_confidence,
+                        ) = match normalizer.execute(norm_input).await {
+                            Ok(output) => {
+                                let d = output.list.data;
+                                info!(
+                                    "    Normalized: {} - {} ({} units, {}pts)",
+                                    d.faction,
+                                    d.detachment.as_deref().unwrap_or("(none)"),
+                                    d.units.len(),
+                                    d.total_points,
+                                );
+                                (
+                                    d.faction,
+                                    d.detachment,
+                                    d.subfaction,
+                                    d.total_points,
+                                    d.units,
+                                    output.list.confidence,
+                                )
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "    List normalization failed for {}: {}",
+                                    raw_list.player_name, e
+                                );
+                                (
+                                    faction,
+                                    None,
+                                    None,
+                                    0,
+                                    Vec::new(),
+                                    crate::models::Confidence::Low,
+                                )
+                            }
+                        };
 
                         let mut army_list = ArmyList::new(
                             norm_faction,

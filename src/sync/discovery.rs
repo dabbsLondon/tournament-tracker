@@ -54,12 +54,10 @@ pub fn discover_goonhammer_articles(html: &str, base_url: &Url) -> Vec<Discovere
             Err(_) => continue,
         };
 
-        let date = article_el.select(&time_sel).next().and_then(|time_el| {
-            time_el
-                .value()
-                .attr("datetime")
-                .and_then(parse_date)
-        });
+        let date = article_el
+            .select(&time_sel)
+            .next()
+            .and_then(|time_el| time_el.value().attr("datetime").and_then(parse_date));
 
         articles.push(DiscoveredArticle {
             url,
@@ -100,11 +98,10 @@ pub fn discover_from_rss(xml: &str) -> Vec<DiscoveredArticle> {
             Err(_) => continue,
         };
 
-        let date = extract_xml_tag(item, "pubDate")
-            .and_then(|d| parse_rss_date(d.trim()));
+        let date = extract_xml_tag(item, "pubDate").and_then(|d| parse_rss_date(d.trim()));
 
-        let wp_post_id = extract_xml_tag(item, "post-id")
-            .and_then(|id| id.trim().parse::<u64>().ok());
+        let wp_post_id =
+            extract_xml_tag(item, "post-id").and_then(|id| id.trim().parse::<u64>().ok());
 
         articles.push(DiscoveredArticle {
             url,
@@ -209,8 +206,20 @@ pub fn extract_text_from_html(html: &str) -> String {
 fn extract_text_recursive(element: &scraper::ElementRef, text: &mut String) {
     // Block-level tags that should produce line breaks
     const BLOCK_TAGS: &[&str] = &[
-        "p", "div", "h1", "h2", "h3", "h4", "h5", "h6",
-        "li", "tr", "br", "hr", "blockquote", "pre",
+        "p",
+        "div",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "li",
+        "tr",
+        "br",
+        "hr",
+        "blockquote",
+        "pre",
     ];
     // Tags to skip entirely
     const SKIP_TAGS: &[&str] = &["script", "style", "noscript", "svg", "iframe"];
@@ -315,8 +324,8 @@ mod tests {
 
     #[test]
     fn test_discover_goonhammer_articles() {
-        let base = Url::parse("https://www.goonhammer.com/category/competitive-innovations/")
-            .unwrap();
+        let base =
+            Url::parse("https://www.goonhammer.com/category/competitive-innovations/").unwrap();
         let articles = discover_goonhammer_articles(sample_html(), &base);
 
         assert_eq!(articles.len(), 3);
@@ -489,9 +498,6 @@ mod tests {
     #[test]
     fn test_parse_rss_date() {
         let date = parse_rss_date("Wed, 04 Feb 2026 13:00:57 +0000");
-        assert_eq!(
-            date,
-            Some(NaiveDate::from_ymd_opt(2026, 2, 4).unwrap())
-        );
+        assert_eq!(date, Some(NaiveDate::from_ymd_opt(2026, 2, 4).unwrap()));
     }
 }

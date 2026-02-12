@@ -46,8 +46,7 @@ pub fn repartition(
     );
 
     // 2. Read all entities from source
-    let event_reader =
-        JsonlReader::<Event>::for_entity(storage, EntityType::Event, source_epoch);
+    let event_reader = JsonlReader::<Event>::for_entity(storage, EntityType::Event, source_epoch);
     let events = dedup_by_id(event_reader.read_all()?, |e| e.id.as_str());
 
     let placement_reader =
@@ -75,10 +74,7 @@ pub fn repartition(
         let epoch_str = epoch_id.as_str().to_string();
         event.epoch_id = epoch_id;
         event_epoch_map.insert(event.id.as_str().to_string(), epoch_str.clone());
-        events_by_epoch
-            .entry(epoch_str)
-            .or_default()
-            .push(event);
+        events_by_epoch.entry(epoch_str).or_default().push(event);
     }
 
     // 4. Assign placements to same epoch as their event
@@ -116,10 +112,7 @@ pub fn repartition(
                 .cloned()
                 .unwrap_or_else(|| source_epoch.to_string())
         };
-        lists_by_epoch
-            .entry(epoch_str)
-            .or_default()
-            .push(list);
+        lists_by_epoch.entry(epoch_str).or_default().push(list);
     }
 
     // 6. Report
@@ -145,15 +138,11 @@ pub fn repartition(
             .map_or(0, |v| v.len() as u32);
         let n_lists = lists_by_epoch.get(epoch_id).map_or(0, |v| v.len() as u32);
 
-        result
-            .events_by_epoch
-            .insert(epoch_id.clone(), n_events);
+        result.events_by_epoch.insert(epoch_id.clone(), n_events);
         result
             .placements_by_epoch
             .insert(epoch_id.clone(), n_placements);
-        result
-            .lists_by_epoch
-            .insert(epoch_id.clone(), n_lists);
+        result.lists_by_epoch.insert(epoch_id.clone(), n_lists);
 
         info!(
             "  Epoch '{}': {} events, {} placements, {} lists",
@@ -165,8 +154,7 @@ pub fn repartition(
     if !dry_run {
         for epoch_id in &all_epoch_ids {
             if let Some(evts) = events_by_epoch.get(epoch_id) {
-                let writer =
-                    JsonlWriter::<Event>::for_entity(storage, EntityType::Event, epoch_id);
+                let writer = JsonlWriter::<Event>::for_entity(storage, EntityType::Event, epoch_id);
                 writer.write_all(evts)?;
             }
             if let Some(plcs) = placements_by_epoch.get(epoch_id) {
@@ -191,14 +179,24 @@ pub fn repartition(
                 // Don't overwrite an existing backup
                 if !bak_dir.exists() {
                     std::fs::rename(&src_dir, &bak_dir)?;
-                    info!("Backed up '{}' -> '{}'", src_dir.display(), bak_dir.display());
+                    info!(
+                        "Backed up '{}' -> '{}'",
+                        src_dir.display(),
+                        bak_dir.display()
+                    );
                 } else {
-                    info!("Backup already exists at '{}', skipping rename", bak_dir.display());
+                    info!(
+                        "Backup already exists at '{}', skipping rename",
+                        bak_dir.display()
+                    );
                 }
             }
         }
 
-        info!("Repartition complete: wrote {} epoch directories", all_epoch_ids.len());
+        info!(
+            "Repartition complete: wrote {} epoch directories",
+            all_epoch_ids.len()
+        );
     }
 
     Ok(result)

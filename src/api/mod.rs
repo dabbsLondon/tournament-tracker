@@ -20,8 +20,8 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
-use crate::models::EpochMapper;
 use crate::api::state::AppState;
+use crate::models::EpochMapper;
 
 /// Build the full application router.
 pub fn build_router(state: AppState) -> Router {
@@ -29,14 +29,23 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/events", get(routes::events::list_events))
         .route("/api/events/:id", get(routes::events::get_event))
         .route("/api/meta/factions", get(routes::meta::faction_stats))
-        .route("/api/meta/factions/:name", get(routes::meta::faction_detail))
+        .route(
+            "/api/meta/factions/:name",
+            get(routes::meta::faction_detail),
+        )
         .route("/api/meta/allegiances", get(routes::meta::allegiance_stats))
         .route("/api/epochs", get(routes::epochs::list_epochs))
         .route("/api/balance", get(routes::epochs::list_balance_passes))
         .route("/api/balance/:id", get(routes::epochs::get_balance_pass))
         .route("/api/analytics/overview", get(routes::analytics::overview))
-        .route("/api/analytics/trends", get(routes::analytics::faction_trends))
-        .route("/api/analytics/players", get(routes::analytics::top_players))
+        .route(
+            "/api/analytics/trends",
+            get(routes::analytics::faction_trends),
+        )
+        .route(
+            "/api/analytics/players",
+            get(routes::analytics::top_players),
+        )
         .route("/api/analytics/units", get(routes::analytics::top_units));
 
     Router::new()
@@ -256,9 +265,18 @@ mod tests {
             val: i32,
         }
         let items = vec![
-            Item { id: "a".into(), val: 1 },
-            Item { id: "b".into(), val: 2 },
-            Item { id: "a".into(), val: 3 },
+            Item {
+                id: "a".into(),
+                val: 1,
+            },
+            Item {
+                id: "b".into(),
+                val: 2,
+            },
+            Item {
+                id: "a".into(),
+                val: 3,
+            },
         ];
         let deduped = dedup_by_id(items, |i| &i.id);
         assert_eq!(deduped.len(), 2);

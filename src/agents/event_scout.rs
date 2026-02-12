@@ -98,11 +98,13 @@ impl EventScoutAgent {
 
     fn parse_response(&self, response: &str) -> Result<Vec<AgentOutput<EventStub>>, AgentError> {
         let json = super::extract_json(response);
-        let parsed: EventScoutResponse = serde_json::from_str(json)
-            .map_err(|e| {
-                tracing::warn!("Event Scout JSON parse error. Response start: {}", &response[..response.len().min(200)]);
-                AgentError::ResponseParseError(format!("Invalid JSON: {}", e))
-            })?;
+        let parsed: EventScoutResponse = serde_json::from_str(json).map_err(|e| {
+            tracing::warn!(
+                "Event Scout JSON parse error. Response start: {}",
+                &response[..response.len().min(200)]
+            );
+            AgentError::ResponseParseError(format!("Invalid JSON: {}", e))
+        })?;
 
         let mut results = Vec::new();
 

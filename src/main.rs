@@ -342,7 +342,10 @@ async fn main() -> Result<()> {
                         .to_string(),
                 }],
                 Some(other) => {
-                    eprintln!("Unknown source: {}. Use 'goonhammer' or 'warhammer-community'.", other);
+                    eprintln!(
+                        "Unknown source: {}. Use 'goonhammer' or 'warhammer-community'.",
+                        other
+                    );
                     return Ok(());
                 }
             };
@@ -361,7 +364,8 @@ async fn main() -> Result<()> {
             .expect("Failed to create fetcher");
 
             // Parse interval
-            let sync_interval = parse_duration(&interval_str).unwrap_or(Duration::from_secs(6 * 3600));
+            let sync_interval =
+                parse_duration(&interval_str).unwrap_or(Duration::from_secs(6 * 3600));
 
             let sync_config = SyncConfig {
                 sources,
@@ -375,13 +379,17 @@ async fn main() -> Result<()> {
             // Direct URL mode: process a single article without discovery
             if let Some(ref article_url) = direct_url {
                 tracing::info!("Processing single article: {}", article_url);
-                let article_url = url::Url::parse(article_url)
-                    .unwrap_or_else(|e| panic!("Invalid URL: {}", e));
+                let article_url =
+                    url::Url::parse(article_url).unwrap_or_else(|e| panic!("Invalid URL: {}", e));
 
                 let sync_config_clone = sync_config.clone();
                 let orchestrator = SyncOrchestrator::new(sync_config, fetcher, backend);
                 match orchestrator
-                    .process_single_article(&article_url, chrono::Utc::now().date_naive(), &sync_config_clone)
+                    .process_single_article(
+                        &article_url,
+                        chrono::Utc::now().date_naive(),
+                        &sync_config_clone,
+                    )
                     .await
                 {
                     Ok((events, placements, lists)) => {
@@ -437,7 +445,10 @@ async fn main() -> Result<()> {
             let storage = StorageConfig::new(std::path::PathBuf::from(&cli.data_dir));
             let epoch_mapper = match read_significant_events(&storage) {
                 Ok(events) if !events.is_empty() => {
-                    tracing::info!("Loaded {} significant events for epoch mapping", events.len());
+                    tracing::info!(
+                        "Loaded {} significant events for epoch mapping",
+                        events.len()
+                    );
                     EpochMapper::from_significant_events(&events)
                 }
                 _ => EpochMapper::new(),
@@ -493,7 +504,8 @@ async fn main() -> Result<()> {
                     "current".to_string()
                 } else {
                     let mapper = EpochMapper::from_significant_events(&sig);
-                    mapper.current_epoch()
+                    mapper
+                        .current_epoch()
                         .map(|e| e.id.as_str().to_string())
                         .unwrap_or_else(|| "current".to_string())
                 }
@@ -503,9 +515,7 @@ async fn main() -> Result<()> {
             // Read all army lists
             let reader =
                 JsonlReader::<ArmyList>::for_entity(&storage, EntityType::ArmyList, &epoch_id);
-            let lists = reader
-                .read_all()
-                .expect("Failed to read army lists");
+            let lists = reader.read_all().expect("Failed to read army lists");
             let mut lists = dedup_by_id(lists, |l| l.id.as_str());
 
             let total = lists.len();
@@ -527,20 +537,19 @@ async fn main() -> Result<()> {
             let agent = ListNormalizerAgent::new(backend);
 
             // Normalize the faction filter for comparison
-            let faction_filter = faction.as_deref().map(|f| {
-                meta_agent::api::routes::events::normalize_faction_name(f)
-            });
+            let faction_filter = faction
+                .as_deref()
+                .map(|f| meta_agent::api::routes::events::normalize_faction_name(f));
 
             // Determine which lists to process
             let indices: Vec<usize> = lists
                 .iter()
                 .enumerate()
                 .filter(|(_, l)| !only_empty || l.units.is_empty())
-                .filter(|(_, l)| {
-                    match &faction_filter {
-                        Some(ff) => meta_agent::api::routes::events::normalize_faction_name(&l.faction).eq_ignore_ascii_case(ff),
-                        None => true,
-                    }
+                .filter(|(_, l)| match &faction_filter {
+                    Some(ff) => meta_agent::api::routes::events::normalize_faction_name(&l.faction)
+                        .eq_ignore_ascii_case(ff),
+                    None => true,
                 })
                 .map(|(i, _)| i)
                 .take(limit.unwrap_or(usize::MAX))
@@ -561,7 +570,11 @@ async fn main() -> Result<()> {
                 let list = &lists[idx];
 
                 if list.raw_text.trim().is_empty() {
-                    tracing::warn!("[{}/{}] Skipping list with empty raw_text", progress + 1, to_process);
+                    tracing::warn!(
+                        "[{}/{}] Skipping list with empty raw_text",
+                        progress + 1,
+                        to_process
+                    );
                     continue;
                 }
 
@@ -670,7 +683,10 @@ async fn main() -> Result<()> {
                         );
                     } else {
                         let mapper = EpochMapper::from_significant_events(&events);
-                        println!("=== Epoch Timeline ({} epochs) ===\n", mapper.all_epochs().len());
+                        println!(
+                            "=== Epoch Timeline ({} epochs) ===\n",
+                            mapper.all_epochs().len()
+                        );
                         for epoch in mapper.all_epochs() {
                             let end = epoch
                                 .end_date
@@ -723,7 +739,11 @@ async fn main() -> Result<()> {
                     println!("=== List Matching Report (epoch: {}) ===\n", epoch_id);
                     println!("Events: {}", events.len());
                     println!("Placements: {}", placements.len());
-                    println!("Army lists: {} ({} with units)\n", lists.len(), lists.iter().filter(|l| !l.units.is_empty()).count());
+                    println!(
+                        "Army lists: {} ({} with units)\n",
+                        lists.len(),
+                        lists.iter().filter(|l| !l.units.is_empty()).count()
+                    );
 
                     let mut matched = 0u32;
                     let mut unmatched = 0u32;
@@ -734,7 +754,10 @@ async fn main() -> Result<()> {
                         if p.rank > 4 {
                             continue;
                         }
-                        let event_url = event_urls.get(p.event_id.as_str()).cloned().unwrap_or_default();
+                        let event_url = event_urls
+                            .get(p.event_id.as_str())
+                            .cloned()
+                            .unwrap_or_default();
                         let event_lists: Vec<&ArmyList> = lists
                             .iter()
                             .filter(|l| l.source_url.as_deref() == Some(event_url.as_str()))
@@ -743,14 +766,22 @@ async fn main() -> Result<()> {
                         // Try player name match
                         let name_match = event_lists.iter().any(|l| {
                             l.player_name.as_ref().is_some_and(|name| {
-                                let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+                                let norm = |s: &str| {
+                                    s.split_whitespace()
+                                        .collect::<Vec<_>>()
+                                        .join(" ")
+                                        .to_lowercase()
+                                };
                                 norm(&p.player_name) == norm(name)
                             })
                         });
 
                         // Try faction+detachment match
                         let faction_match = event_lists.iter().any(|l| {
-                            let score = faction_match_score(&normalize_faction_name(&p.faction), &normalize_faction_name(&l.faction));
+                            let score = faction_match_score(
+                                &normalize_faction_name(&p.faction),
+                                &normalize_faction_name(&l.faction),
+                            );
                             let det_match = match (&p.detachment, &l.detachment) {
                                 (Some(pd), Some(ld)) => pd.eq_ignore_ascii_case(ld),
                                 _ => false,
@@ -762,17 +793,28 @@ async fn main() -> Result<()> {
                             matched += 1;
                         } else {
                             unmatched += 1;
-                            let event_name = events.iter().find(|e| e.id == p.event_id).map(|e| e.name.as_str()).unwrap_or("?");
+                            let event_name = events
+                                .iter()
+                                .find(|e| e.id == p.event_id)
+                                .map(|e| e.name.as_str())
+                                .unwrap_or("?");
                             unmatched_details.push(format!(
                                 "  #{} {} ({}, {}) — {}",
-                                p.rank, p.player_name, p.faction,
-                                p.detachment.as_deref().unwrap_or("-"), event_name
+                                p.rank,
+                                p.player_name,
+                                p.faction,
+                                p.detachment.as_deref().unwrap_or("-"),
+                                event_name
                             ));
                         }
                     }
 
                     let total = matched + unmatched;
-                    let pct = if total > 0 { (matched as f64 / total as f64) * 100.0 } else { 0.0 };
+                    let pct = if total > 0 {
+                        (matched as f64 / total as f64) * 100.0
+                    } else {
+                        0.0
+                    };
                     println!("Top-4 placements: {}", total);
                     println!("Matched to list:  {} ({:.1}%)", matched, pct);
                     println!("Unmatched:        {}\n", unmatched);
@@ -785,7 +827,8 @@ async fn main() -> Result<()> {
                     }
 
                     // Check for duplicate faction names
-                    let mut faction_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+                    let mut faction_names: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
                     let mut dupes: Vec<String> = Vec::new();
                     for p in &placements {
                         let norm = normalize_faction_name(&p.faction);
@@ -892,14 +935,20 @@ async fn main() -> Result<()> {
 
             let mapper = EpochMapper::from_significant_events(&existing);
             println!("Registered balance pass: {} ({})", title, date);
-            println!("\n=== Epoch Timeline ({} epochs) ===\n", mapper.all_epochs().len());
+            println!(
+                "\n=== Epoch Timeline ({} epochs) ===\n",
+                mapper.all_epochs().len()
+            );
             for epoch in mapper.all_epochs() {
                 let end = epoch
                     .end_date
                     .map(|d| d.to_string())
                     .unwrap_or_else(|| "now".to_string());
                 let current = if epoch.is_current { " [CURRENT]" } else { "" };
-                println!("  {} — {} to {}{}", epoch.name, epoch.start_date, end, current);
+                println!(
+                    "  {} — {} to {}{}",
+                    epoch.name, epoch.start_date, end, current
+                );
             }
         }
         Commands::DiscoverBalancePasses { dry_run, url } => {
@@ -916,8 +965,8 @@ async fn main() -> Result<()> {
             })
             .expect("Failed to create fetcher");
 
-            let page_url = url::Url::parse(&page_url)
-                .unwrap_or_else(|e| panic!("Invalid URL: {}", e));
+            let page_url =
+                url::Url::parse(&page_url).unwrap_or_else(|e| panic!("Invalid URL: {}", e));
 
             // Fetch and run BalanceWatcherAgent
             let fetch_result = fetcher.fetch(&page_url).await?;
@@ -960,14 +1009,20 @@ async fn main() -> Result<()> {
                 }
 
                 let mapper = EpochMapper::from_significant_events(&merged);
-                println!("\n=== Epoch Timeline ({} epochs) ===\n", mapper.all_epochs().len());
+                println!(
+                    "\n=== Epoch Timeline ({} epochs) ===\n",
+                    mapper.all_epochs().len()
+                );
                 for epoch in mapper.all_epochs() {
                     let end = epoch
                         .end_date
                         .map(|d| d.to_string())
                         .unwrap_or_else(|| "now".to_string());
                     let current = if epoch.is_current { " [CURRENT]" } else { "" };
-                    println!("  {} — {} to {}{}", epoch.name, epoch.start_date, end, current);
+                    println!(
+                        "  {} — {} to {}{}",
+                        epoch.name, epoch.start_date, end, current
+                    );
                 }
             }
         }
@@ -989,81 +1044,79 @@ async fn main() -> Result<()> {
             // ── Step 1: Check for balance passes ──
             println!("Step 1: Checking for balance passes...");
             let wh_url = "https://www.warhammer-community.com/en-gb/downloads/warhammer-40000/";
-            let balance_page_url = url::Url::parse(wh_url)
-                .expect("Invalid Warhammer Community URL");
+            let balance_page_url =
+                url::Url::parse(wh_url).expect("Invalid Warhammer Community URL");
 
             let mut new_balance_passes = 0u32;
             match fetcher.fetch(&balance_page_url).await {
-                Ok(fetch_result) => {
-                    match fetcher.read_cached_text(&fetch_result).await {
-                        Ok(html) => {
-                            use meta_agent::agents::balance_watcher::{
-                                BalanceWatcherAgent, BalanceWatcherInput,
-                            };
-                            let watcher = BalanceWatcherAgent::new(backend.clone());
-                            let existing = read_significant_events(&storage).unwrap_or_default();
-                            let known_ids: Vec<meta_agent::models::EntityId> =
-                                existing.iter().map(|e| e.id.clone()).collect();
-                            let input = BalanceWatcherInput {
-                                html_content: html,
-                                source_url: wh_url.to_string(),
-                                known_event_ids: known_ids,
-                            };
-                            match watcher.execute(input).await {
-                                Ok(output) => {
-                                    new_balance_passes = output.events.len() as u32;
-                                    if new_balance_passes > 0 {
-                                        println!(
-                                            "  Found {} new balance pass(es)!",
-                                            new_balance_passes
-                                        );
-                                        if !dry_run {
-                                            let mut all_events = existing;
-                                            let existing_ids: std::collections::HashSet<String> =
-                                                all_events
-                                                    .iter()
-                                                    .map(|e| e.id.as_str().to_string())
-                                                    .collect();
-                                            for event_output in &output.events {
-                                                println!(
-                                                    "    - {} ({})",
-                                                    event_output.data.title,
-                                                    event_output.data.date
-                                                );
-                                                if !existing_ids
-                                                    .contains(event_output.data.id.as_str())
-                                                {
-                                                    all_events.push(event_output.data.clone());
-                                                }
-                                            }
-                                            if let Err(e) = write_significant_events(
-                                                &storage,
-                                                &mut all_events,
-                                            ) {
-                                                tracing::error!(
-                                                    "Failed to write significant events: {}",
-                                                    e
-                                                );
+                Ok(fetch_result) => match fetcher.read_cached_text(&fetch_result).await {
+                    Ok(html) => {
+                        use meta_agent::agents::balance_watcher::{
+                            BalanceWatcherAgent, BalanceWatcherInput,
+                        };
+                        let watcher = BalanceWatcherAgent::new(backend.clone());
+                        let existing = read_significant_events(&storage).unwrap_or_default();
+                        let known_ids: Vec<meta_agent::models::EntityId> =
+                            existing.iter().map(|e| e.id.clone()).collect();
+                        let input = BalanceWatcherInput {
+                            html_content: html,
+                            source_url: wh_url.to_string(),
+                            known_event_ids: known_ids,
+                        };
+                        match watcher.execute(input).await {
+                            Ok(output) => {
+                                new_balance_passes = output.events.len() as u32;
+                                if new_balance_passes > 0 {
+                                    println!(
+                                        "  Found {} new balance pass(es)!",
+                                        new_balance_passes
+                                    );
+                                    if !dry_run {
+                                        let mut all_events = existing;
+                                        let existing_ids: std::collections::HashSet<String> =
+                                            all_events
+                                                .iter()
+                                                .map(|e| e.id.as_str().to_string())
+                                                .collect();
+                                        for event_output in &output.events {
+                                            println!(
+                                                "    - {} ({})",
+                                                event_output.data.title, event_output.data.date
+                                            );
+                                            if !existing_ids.contains(event_output.data.id.as_str())
+                                            {
+                                                all_events.push(event_output.data.clone());
                                             }
                                         }
-                                    } else {
-                                        println!("  No new balance passes found.");
+                                        if let Err(e) =
+                                            write_significant_events(&storage, &mut all_events)
+                                        {
+                                            tracing::error!(
+                                                "Failed to write significant events: {}",
+                                                e
+                                            );
+                                        }
                                     }
-                                }
-                                Err(e) => {
-                                    tracing::warn!("Balance watcher failed: {}", e);
-                                    println!("  Balance watcher failed: {}", e);
+                                } else {
+                                    println!("  No new balance passes found.");
                                 }
                             }
+                            Err(e) => {
+                                tracing::warn!("Balance watcher failed: {}", e);
+                                println!("  Balance watcher failed: {}", e);
+                            }
                         }
-                        Err(e) => println!("  Failed to read page: {}", e),
                     }
-                }
+                    Err(e) => println!("  Failed to read page: {}", e),
+                },
                 Err(e) => println!("  Failed to fetch Warhammer Community: {}", e),
             }
 
             // ── Step 2: Sync new tournament results ──
-            println!("\nStep 2: Syncing tournament results ({} to {})...", from_date, today);
+            println!(
+                "\nStep 2: Syncing tournament results ({} to {})...",
+                from_date, today
+            );
 
             let sync_config = SyncConfig {
                 sources: vec![SyncSource::default()],
@@ -1096,9 +1149,8 @@ async fn main() -> Result<()> {
             // ── Step 3: Repartition if new balance pass found ──
             if new_balance_passes > 0 && !dry_run {
                 println!("\nStep 3: Repartitioning data into new epochs...");
-                match meta_agent::sync::repartition::repartition(
-                    &storage, "current", false, false,
-                ) {
+                match meta_agent::sync::repartition::repartition(&storage, "current", false, false)
+                {
                     Ok(result) => {
                         let mut all_epochs: Vec<_> = result.events_by_epoch.keys().collect();
                         all_epochs.sort();
@@ -1129,7 +1181,11 @@ async fn main() -> Result<()> {
 
             println!("\n=== Weekly update complete ===");
         }
-        Commands::ReclassifyFactions { epoch, all, dry_run } => {
+        Commands::ReclassifyFactions {
+            epoch,
+            all,
+            dry_run,
+        } => {
             use meta_agent::api::routes::events::resolve_faction;
 
             let storage = StorageConfig::new(std::path::PathBuf::from(&cli.data_dir));
@@ -1156,7 +1212,8 @@ async fn main() -> Result<()> {
                     "current".to_string()
                 } else {
                     let mapper = EpochMapper::from_significant_events(&sig);
-                    mapper.current_epoch()
+                    mapper
+                        .current_epoch()
                         .map(|e| e.id.as_str().to_string())
                         .unwrap_or_else(|| "current".to_string())
                 };
@@ -1180,8 +1237,11 @@ async fn main() -> Result<()> {
                 println!("=== Reclassify Factions (epoch: {}) ===\n", epoch_id);
 
                 // ── Process placements ──
-                let placement_reader =
-                    JsonlReader::<meta_agent::models::Placement>::for_entity(&storage, meta_agent::storage::EntityType::Placement, epoch_id);
+                let placement_reader = JsonlReader::<meta_agent::models::Placement>::for_entity(
+                    &storage,
+                    meta_agent::storage::EntityType::Placement,
+                    epoch_id,
+                );
                 let placements = match placement_reader.read_all() {
                     Ok(p) => p,
                     Err(e) => {
@@ -1191,7 +1251,10 @@ async fn main() -> Result<()> {
                 };
                 let mut placements = dedup_by_id(placements, |p| p.id.as_str());
 
-                let placement_path = storage.normalized_dir().join(epoch_id).join("placements.jsonl");
+                let placement_path = storage
+                    .normalized_dir()
+                    .join(epoch_id)
+                    .join("placements.jsonl");
                 if placement_path.exists() && !dry_run && !placements.is_empty() {
                     let bak = placement_path.with_extension("jsonl.pre-reclassify.bak");
                     std::fs::copy(&placement_path, &bak).expect("Failed to backup placements");
@@ -1204,16 +1267,20 @@ async fn main() -> Result<()> {
                     let mut changed = false;
                     if p.faction != resolved.faction {
                         if dry_run {
-                            println!("  [placement] #{} {} — faction: \"{}\" → \"{}\"",
-                                p.rank, p.player_name, p.faction, resolved.faction);
+                            println!(
+                                "  [placement] #{} {} — faction: \"{}\" → \"{}\"",
+                                p.rank, p.player_name, p.faction, resolved.faction
+                            );
                         }
                         p.faction = resolved.faction.clone();
                         changed = true;
                     }
                     if p.subfaction != resolved.subfaction {
                         if dry_run && (p.subfaction.is_some() || resolved.subfaction.is_some()) {
-                            println!("  [placement] #{} {} — subfaction: {:?} → {:?}",
-                                p.rank, p.player_name, p.subfaction, resolved.subfaction);
+                            println!(
+                                "  [placement] #{} {} — subfaction: {:?} → {:?}",
+                                p.rank, p.player_name, p.subfaction, resolved.subfaction
+                            );
                         }
                         p.subfaction = resolved.subfaction.clone();
                         changed = true;
@@ -1230,12 +1297,17 @@ async fn main() -> Result<()> {
                 if !dry_run && !placements.is_empty() {
                     let writer = meta_agent::storage::JsonlWriter::<meta_agent::models::Placement>::for_entity(
                         &storage, meta_agent::storage::EntityType::Placement, epoch_id);
-                    writer.write_all(&placements).expect("Failed to write placements");
+                    writer
+                        .write_all(&placements)
+                        .expect("Failed to write placements");
                 }
 
                 // ── Process army lists ──
-                let list_reader =
-                    JsonlReader::<ArmyList>::for_entity(&storage, meta_agent::storage::EntityType::ArmyList, epoch_id);
+                let list_reader = JsonlReader::<ArmyList>::for_entity(
+                    &storage,
+                    meta_agent::storage::EntityType::ArmyList,
+                    epoch_id,
+                );
                 let lists = match list_reader.read_all() {
                     Ok(l) => l,
                     Err(e) => {
@@ -1245,7 +1317,10 @@ async fn main() -> Result<()> {
                 };
                 let mut lists = dedup_by_id(lists, |l| l.id.as_str());
 
-                let list_path = storage.normalized_dir().join(epoch_id).join("army_lists.jsonl");
+                let list_path = storage
+                    .normalized_dir()
+                    .join(epoch_id)
+                    .join("army_lists.jsonl");
                 if list_path.exists() && !dry_run && !lists.is_empty() {
                     let bak = list_path.with_extension("jsonl.pre-reclassify.bak");
                     std::fs::copy(&list_path, &bak).expect("Failed to backup army lists");
@@ -1258,8 +1333,12 @@ async fn main() -> Result<()> {
                     let mut changed = false;
                     if l.faction != resolved.faction {
                         if dry_run {
-                            println!("  [list] {} — faction: \"{}\" → \"{}\"",
-                                l.player_name.as_deref().unwrap_or("?"), l.faction, resolved.faction);
+                            println!(
+                                "  [list] {} — faction: \"{}\" → \"{}\"",
+                                l.player_name.as_deref().unwrap_or("?"),
+                                l.faction,
+                                resolved.faction
+                            );
                         }
                         l.faction = resolved.faction.clone();
                         changed = true;
@@ -1279,8 +1358,13 @@ async fn main() -> Result<()> {
 
                 if !dry_run && !lists.is_empty() {
                     let writer = meta_agent::storage::JsonlWriter::<ArmyList>::for_entity(
-                        &storage, meta_agent::storage::EntityType::ArmyList, epoch_id);
-                    writer.write_all(&lists).expect("Failed to write army lists");
+                        &storage,
+                        meta_agent::storage::EntityType::ArmyList,
+                        epoch_id,
+                    );
+                    writer
+                        .write_all(&lists)
+                        .expect("Failed to write army lists");
                 }
 
                 println!("  Placements: {} total, {} changed", p_total, p_changed);
@@ -1293,8 +1377,14 @@ async fn main() -> Result<()> {
             }
 
             println!("=== Reclassify Results ({} epochs) ===", epoch_ids.len());
-            println!("Placements: {} total, {} changed", grand_p_total, grand_p_changed);
-            println!("Army lists: {} total, {} changed", grand_l_total, grand_l_changed);
+            println!(
+                "Placements: {} total, {} changed",
+                grand_p_total, grand_p_changed
+            );
+            println!(
+                "Army lists: {} total, {} changed",
+                grand_l_total, grand_l_changed
+            );
             if dry_run {
                 println!("\n(dry run — no data written to disk)");
             }
@@ -1305,7 +1395,12 @@ async fn main() -> Result<()> {
             keep_originals,
         } => {
             let storage = StorageConfig::new(std::path::PathBuf::from(&cli.data_dir));
-            match meta_agent::sync::repartition::repartition(&storage, &source, dry_run, keep_originals) {
+            match meta_agent::sync::repartition::repartition(
+                &storage,
+                &source,
+                dry_run,
+                keep_originals,
+            ) {
                 Ok(result) => {
                     println!("\n=== Repartition Results ===");
                     let mut all_epochs: Vec<_> = result.events_by_epoch.keys().collect();
@@ -1342,13 +1437,11 @@ fn select_backend() -> Arc<dyn AiBackend> {
     {
         if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
             tracing::info!("Using Anthropic backend (claude-sonnet-4-20250514)");
-            return Arc::new(
-                meta_agent::agents::backend::AnthropicBackend::new(
-                    api_key,
-                    "claude-sonnet-4-20250514".to_string(),
-                    120,
-                ),
-            );
+            return Arc::new(meta_agent::agents::backend::AnthropicBackend::new(
+                api_key,
+                "claude-sonnet-4-20250514".to_string(),
+                120,
+            ));
         }
     }
 

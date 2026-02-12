@@ -9,7 +9,9 @@ use crate::api::{dedup_by_id, resolve_epoch, ApiError};
 use crate::models::{ArmyList, Event, Placement};
 use crate::storage::{EntityType, JsonlReader};
 
-use super::events::{army_list_to_detail, faction_allegiance, normalize_faction_name, ArmyListDetail};
+use super::events::{
+    army_list_to_detail, faction_allegiance, normalize_faction_name, ArmyListDetail,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct FactionStatsParams {
@@ -132,7 +134,10 @@ pub async fn faction_stats(
     // Group by normalized faction name
     let mut faction_map: HashMap<String, Vec<&Placement>> = HashMap::new();
     for p in &placements {
-        faction_map.entry(normalize_faction_name(&p.faction)).or_default().push(p);
+        faction_map
+            .entry(normalize_faction_name(&p.faction))
+            .or_default()
+            .push(p);
     }
 
     let min_players = params.min_players.unwrap_or(0);
@@ -182,7 +187,10 @@ pub async fn faction_stats(
                     for l in lists {
                         for u in &l.units {
                             // Skip characters — focus on non-character units for "common picks"
-                            let is_char = u.keywords.iter().any(|k| k == "Character" || k == "Epic Hero");
+                            let is_char = u
+                                .keywords
+                                .iter()
+                                .any(|k| k == "Character" || k == "Epic Hero");
                             if !is_char {
                                 *unit_map.entry(u.name.clone()).or_default() += 1;
                             }
@@ -278,16 +286,21 @@ pub async fn faction_detail(
     let normalized_query = normalize_faction_name(&faction_name);
     let faction_placements: Vec<_> = placements
         .into_iter()
-        .filter(|p| normalize_faction_name(&p.faction).eq_ignore_ascii_case(&normalized_query) && p.rank <= 4)
+        .filter(|p| {
+            normalize_faction_name(&p.faction).eq_ignore_ascii_case(&normalized_query)
+                && p.rank <= 4
+        })
         .collect();
 
     if faction_placements.is_empty() {
-        return Err(ApiError::NotFound(format!("No placements for faction: {}", faction_name)));
+        return Err(ApiError::NotFound(format!(
+            "No placements for faction: {}",
+            faction_name
+        )));
     }
 
     // Read events to get names/dates
-    let event_reader =
-        JsonlReader::<Event>::for_entity(&state.storage, EntityType::Event, &epoch);
+    let event_reader = JsonlReader::<Event>::for_entity(&state.storage, EntityType::Event, &epoch);
     let events = event_reader
         .read_all()
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -318,7 +331,8 @@ pub async fn faction_detail(
         let event_date = event.map(|e| e.date.to_string()).unwrap_or_default();
         let source_url = event.map(|e| e.source_url.as_str()).unwrap_or("");
 
-        let event_lists: Vec<_> = all_lists.iter()
+        let event_lists: Vec<_> = all_lists
+            .iter()
             .filter(|l| {
                 l.source_url.as_deref() == Some(source_url)
                     && !claimed_list_ids.contains(l.id.as_str())
@@ -328,22 +342,25 @@ pub async fn faction_detail(
         let pname = normalize_name(&p.player_name);
 
         // 1. Player name match within same source article
-        let mut matched_list: Option<&ArmyList> = event_lists.iter()
+        let mut matched_list: Option<&ArmyList> = event_lists
+            .iter()
             .find(|l| {
-                l.player_name.as_ref().is_some_and(|name| pname == normalize_name(name))
+                l.player_name
+                    .as_ref()
+                    .is_some_and(|name| pname == normalize_name(name))
             })
             .copied();
 
         // 2. Player name + faction match across all unclaimed lists
         if matched_list.is_none() {
-            matched_list = all_lists.iter()
-                .find(|l| {
-                    !claimed_list_ids.contains(l.id.as_str())
-                        && l.player_name.as_ref().is_some_and(|name| {
-                            pname == normalize_name(name)
-                                && normalize_faction_name(&l.faction).eq_ignore_ascii_case(&normalized_query)
-                        })
-                });
+            matched_list = all_lists.iter().find(|l| {
+                !claimed_list_ids.contains(l.id.as_str())
+                    && l.player_name.as_ref().is_some_and(|name| {
+                        pname == normalize_name(name)
+                            && normalize_faction_name(&l.faction)
+                                .eq_ignore_ascii_case(&normalized_query)
+                    })
+            });
         }
 
         // Only match by player name — anonymous lists stay unlinked
@@ -365,7 +382,11 @@ pub async fn faction_detail(
     }
 
     // Sort by rank then date descending
-    winners.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| b.event_date.cmp(&a.event_date)));
+    winners.sort_by(|a, b| {
+        a.rank
+            .cmp(&b.rank)
+            .then_with(|| b.event_date.cmp(&a.event_date))
+    });
 
     // Find unmatched lists for this faction (using the claimed_list_ids from matching above)
     let faction_lists: Vec<_> = all_lists
@@ -382,9 +403,10 @@ pub async fn faction_detail(
         .map(|l| {
             let detail = army_list_to_detail(l);
             // Try to find the event this list belongs to via source_url
-            let event = l.source_url.as_deref().and_then(|url| {
-                events.iter().find(|e| e.source_url.as_str() == url)
-            });
+            let event = l
+                .source_url
+                .as_deref()
+                .and_then(|url| events.iter().find(|e| e.source_url.as_str() == url));
             UnmatchedList {
                 player_name: l.player_name.clone(),
                 detachment: l.detachment.clone(),
@@ -499,9 +521,7 @@ pub async fn allegiance_stats(
     // Group factions by allegiance
     let mut allegiance_map: HashMap<String, Vec<AllegianceFaction>> = HashMap::new();
     for (faction, (count, wins)) in &faction_stats_map {
-        let allegiance = faction_allegiance(faction)
-            .unwrap_or("Unknown")
-            .to_string();
+        let allegiance = faction_allegiance(faction).unwrap_or("Unknown").to_string();
         let meta_share = if total > 0 {
             (*count as f64 / total as f64) * 100.0
         } else {
@@ -512,12 +532,15 @@ pub async fn allegiance_stats(
         } else {
             0.0
         };
-        allegiance_map.entry(allegiance).or_default().push(AllegianceFaction {
-            faction: faction.clone(),
-            count: *count,
-            meta_share: (meta_share * 10.0).round() / 10.0,
-            win_rate: (win_rate * 10.0).round() / 10.0,
-        });
+        allegiance_map
+            .entry(allegiance)
+            .or_default()
+            .push(AllegianceFaction {
+                faction: faction.clone(),
+                count: *count,
+                meta_share: (meta_share * 10.0).round() / 10.0,
+                win_rate: (win_rate * 10.0).round() / 10.0,
+            });
     }
 
     // Build response
@@ -551,8 +574,8 @@ pub async fn allegiance_stats(
 mod tests {
     use crate::api::build_router;
     use crate::api::state::AppState;
-    use crate::models::{ArmyList, Event, Placement, Unit};
     use crate::models::EpochMapper;
+    use crate::models::{ArmyList, Event, Placement, Unit};
     use crate::storage::StorageConfig;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -601,7 +624,12 @@ mod tests {
         )
     }
 
-    fn make_list(faction: &str, detachment: &str, player: Option<&str>, source_url: Option<&str>) -> ArmyList {
+    fn make_list(
+        faction: &str,
+        detachment: &str,
+        player: Option<&str>,
+        source_url: Option<&str>,
+    ) -> ArmyList {
         let unit = Unit::new("Test Unit".to_string(), 1).with_points(100);
         let mut list = ArmyList::new(
             faction.to_string(),
@@ -625,7 +653,9 @@ mod tests {
             .await
             .unwrap();
         let status = resp.status();
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
         (status, json)
     }
@@ -640,7 +670,12 @@ mod tests {
 
         let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
         let placement = make_placement(&event, 1, "Alice Smith", "Dark Angels");
-        let list = make_list("Dark Angels", "Wrath of the Rock", Some("Alice Smith"), Some("https://example.com/gt-alpha"));
+        let list = make_list(
+            "Dark Angels",
+            "Wrath of the Rock",
+            Some("Alice Smith"),
+            Some("https://example.com/gt-alpha"),
+        );
 
         write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
         write_jsonl(&epoch_dir.join("placements.jsonl"), &[&placement]);
@@ -651,7 +686,10 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["winners"].as_array().unwrap().len(), 1);
-        assert!(json["winners"][0]["army_list"].is_object(), "Should have matched list by player name");
+        assert!(
+            json["winners"][0]["army_list"].is_object(),
+            "Should have matched list by player name"
+        );
         assert_eq!(json["unmatched_lists"].as_array().unwrap().len(), 0);
     }
 
@@ -664,7 +702,12 @@ mod tests {
         let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
         let placement = make_placement(&event, 1, "Bob Jones", "Necrons");
         // List from a DIFFERENT source URL but same player + faction
-        let list = make_list("Necrons", "Hypercrypt Legion", Some("Bob Jones"), Some("https://other.com/lists"));
+        let list = make_list(
+            "Necrons",
+            "Hypercrypt Legion",
+            Some("Bob Jones"),
+            Some("https://other.com/lists"),
+        );
 
         write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
         write_jsonl(&epoch_dir.join("placements.jsonl"), &[&placement]);
@@ -674,7 +717,10 @@ mod tests {
         let (status, json) = get_json(app, "/api/meta/factions/Necrons").await;
 
         assert_eq!(status, StatusCode::OK);
-        assert!(json["winners"][0]["army_list"].is_object(), "Should match by player name + faction across events");
+        assert!(
+            json["winners"][0]["army_list"].is_object(),
+            "Should match by player name + faction across events"
+        );
     }
 
     #[tokio::test]
@@ -686,7 +732,12 @@ mod tests {
         let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
         let placement = make_placement(&event, 1, "Charlie Brown", "Genestealer Cults");
         // Anonymous list — no player name, same event source
-        let list = make_list("Genestealer Cults", "Strike Force", None, Some("https://example.com/gt-alpha"));
+        let list = make_list(
+            "Genestealer Cults",
+            "Strike Force",
+            None,
+            Some("https://example.com/gt-alpha"),
+        );
 
         write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
         write_jsonl(&epoch_dir.join("placements.jsonl"), &[&placement]);
@@ -696,8 +747,15 @@ mod tests {
         let (status, json) = get_json(app, "/api/meta/factions/Genestealer%20Cults").await;
 
         assert_eq!(status, StatusCode::OK);
-        assert!(json["winners"][0]["army_list"].is_null(), "Anonymous list must NOT be matched");
-        assert_eq!(json["unmatched_lists"].as_array().unwrap().len(), 1, "Anonymous list should appear in unmatched");
+        assert!(
+            json["winners"][0]["army_list"].is_null(),
+            "Anonymous list must NOT be matched"
+        );
+        assert_eq!(
+            json["unmatched_lists"].as_array().unwrap().len(),
+            1,
+            "Anonymous list should appear in unmatched"
+        );
     }
 
     #[tokio::test]
@@ -710,7 +768,12 @@ mod tests {
         let p1 = make_placement(&event, 1, "Dave Wilson", "Dark Angels");
         let p2 = make_placement(&event, 3, "Eve Taylor", "Dark Angels");
         // Only ONE Dark Angels list, belonging to Dave
-        let list = make_list("Dark Angels", "Wrath of the Rock", Some("Dave Wilson"), Some("https://example.com/gt-alpha"));
+        let list = make_list(
+            "Dark Angels",
+            "Wrath of the Rock",
+            Some("Dave Wilson"),
+            Some("https://example.com/gt-alpha"),
+        );
 
         write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
         write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2]);
@@ -720,12 +783,22 @@ mod tests {
         let (_, json) = get_json(app, "/api/meta/factions/Dark%20Angels").await;
 
         let winners = json["winners"].as_array().unwrap();
-        let dave = winners.iter().find(|w| w["player_name"] == "Dave Wilson").unwrap();
-        let eve = winners.iter().find(|w| w["player_name"] == "Eve Taylor").unwrap();
+        let dave = winners
+            .iter()
+            .find(|w| w["player_name"] == "Dave Wilson")
+            .unwrap();
+        let eve = winners
+            .iter()
+            .find(|w| w["player_name"] == "Eve Taylor")
+            .unwrap();
 
         assert!(dave["army_list"].is_object(), "Dave should have the list");
         assert!(eve["army_list"].is_null(), "Eve should NOT get Dave's list");
-        assert_eq!(json["unmatched_lists"].as_array().unwrap().len(), 0, "No unmatched lists — Dave's list was claimed");
+        assert_eq!(
+            json["unmatched_lists"].as_array().unwrap().len(),
+            0,
+            "No unmatched lists — Dave's list was claimed"
+        );
     }
 
     #[tokio::test]
@@ -737,7 +810,12 @@ mod tests {
         let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
         let placement = make_placement(&event, 2, "Frank Miller", "T'au Empire");
         // List belongs to a different player entirely
-        let list = make_list("T'au Empire", "Kauyon", Some("Grace Hopper"), Some("https://example.com/gt-alpha"));
+        let list = make_list(
+            "T'au Empire",
+            "Kauyon",
+            Some("Grace Hopper"),
+            Some("https://example.com/gt-alpha"),
+        );
 
         write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
         write_jsonl(&epoch_dir.join("placements.jsonl"), &[&placement]);
@@ -746,8 +824,15 @@ mod tests {
         let app = build_router(state);
         let (_, json) = get_json(app, "/api/meta/factions/T%27au%20Empire").await;
 
-        assert!(json["winners"][0]["army_list"].is_null(), "Should not match list to wrong player");
-        assert_eq!(json["unmatched_lists"].as_array().unwrap().len(), 1, "Grace Hopper's list should be unlinked");
+        assert!(
+            json["winners"][0]["army_list"].is_null(),
+            "Should not match list to wrong player"
+        );
+        assert_eq!(
+            json["unmatched_lists"].as_array().unwrap().len(),
+            1,
+            "Grace Hopper's list should be unlinked"
+        );
         assert_eq!(json["unmatched_lists"][0]["player_name"], "Grace Hopper");
     }
 
@@ -760,7 +845,12 @@ mod tests {
         let event = make_event("GT Alpha", "2026-01-15", "https://example.com/gt-alpha");
         let p_da = make_placement(&event, 1, "Hank", "Dark Angels");
         let p_ne = make_placement(&event, 2, "Iris", "Necrons");
-        let list_ne = make_list("Necrons", "Hypercrypt Legion", Some("Iris"), Some("https://example.com/gt-alpha"));
+        let list_ne = make_list(
+            "Necrons",
+            "Hypercrypt Legion",
+            Some("Iris"),
+            Some("https://example.com/gt-alpha"),
+        );
 
         write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
         write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p_da, &p_ne]);
@@ -769,12 +859,18 @@ mod tests {
         let app = build_router(state.clone());
         let (_, json_da) = get_json(app, "/api/meta/factions/Dark%20Angels").await;
 
-        assert!(json_da["winners"][0]["army_list"].is_null(), "DA should not get Necrons list");
+        assert!(
+            json_da["winners"][0]["army_list"].is_null(),
+            "DA should not get Necrons list"
+        );
         assert_eq!(json_da["unmatched_lists"].as_array().unwrap().len(), 0);
 
         let app2 = build_router(state);
         let (_, json_ne) = get_json(app2, "/api/meta/factions/Necrons").await;
-        assert!(json_ne["winners"][0]["army_list"].is_object(), "Necrons should get their list");
+        assert!(
+            json_ne["winners"][0]["army_list"].is_object(),
+            "Necrons should get their list"
+        );
     }
 
     #[tokio::test]
@@ -789,13 +885,20 @@ mod tests {
             .collect();
 
         write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
-        write_jsonl(&epoch_dir.join("placements.jsonl"), &placements.iter().collect::<Vec<_>>());
+        write_jsonl(
+            &epoch_dir.join("placements.jsonl"),
+            &placements.iter().collect::<Vec<_>>(),
+        );
         write_jsonl(&epoch_dir.join("army_lists.jsonl"), &Vec::<ArmyList>::new());
 
         let app = build_router(state);
         let (_, json) = get_json(app, "/api/meta/factions/Aeldari").await;
 
-        assert_eq!(json["winners"].as_array().unwrap().len(), 4, "Only top 4 should be shown");
+        assert_eq!(
+            json["winners"].as_array().unwrap().len(),
+            4,
+            "Only top 4 should be shown"
+        );
     }
 
     #[tokio::test]
@@ -805,7 +908,10 @@ mod tests {
         let epoch_dir = tmp.path().join("normalized").join("current");
 
         write_jsonl(&epoch_dir.join("events.jsonl"), &Vec::<Event>::new());
-        write_jsonl(&epoch_dir.join("placements.jsonl"), &Vec::<Placement>::new());
+        write_jsonl(
+            &epoch_dir.join("placements.jsonl"),
+            &Vec::<Placement>::new(),
+        );
         write_jsonl(&epoch_dir.join("army_lists.jsonl"), &Vec::<ArmyList>::new());
 
         let app = build_router(state);

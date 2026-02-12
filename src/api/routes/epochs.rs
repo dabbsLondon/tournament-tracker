@@ -24,9 +24,7 @@ pub struct EpochsResponse {
     pub epochs: Vec<Epoch>,
 }
 
-pub async fn list_epochs(
-    State(state): State<AppState>,
-) -> Result<Json<EpochsResponse>, ApiError> {
+pub async fn list_epochs(State(state): State<AppState>) -> Result<Json<EpochsResponse>, ApiError> {
     let mapper = &state.epoch_mapper;
 
     // Load significant events for balance pass info
@@ -159,8 +157,7 @@ mod tests {
     use crate::api::build_router;
     use crate::api::state::AppState;
     use crate::models::{
-        BalanceChanges, EpochMapper, Event, FactionChange, SignificantEvent,
-        SignificantEventType,
+        BalanceChanges, EpochMapper, Event, FactionChange, SignificantEvent, SignificantEventType,
     };
     use crate::storage::StorageConfig;
     use axum::body::Body;
@@ -184,7 +181,9 @@ mod tests {
             .await
             .unwrap();
         let status = resp.status();
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
         (status, json)
     }
@@ -194,7 +193,10 @@ mod tests {
             SignificantEventType::BalanceUpdate,
             chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap(),
             title.to_string(),
-            format!("https://example.com/{}", title.to_lowercase().replace(' ', "-")),
+            format!(
+                "https://example.com/{}",
+                title.to_lowercase().replace(' ', "-")
+            ),
         );
         if with_changes {
             event.summary = Some("Test balance update summary".to_string());
@@ -216,7 +218,10 @@ mod tests {
     fn setup_with_balance_passes(dir: &std::path::Path, passes: &[SignificantEvent]) -> AppState {
         let storage = StorageConfig::new(dir.to_path_buf());
         std::fs::create_dir_all(dir.join("normalized")).unwrap();
-        write_jsonl(&dir.join("normalized").join("significant_events.jsonl"), passes);
+        write_jsonl(
+            &dir.join("normalized").join("significant_events.jsonl"),
+            passes,
+        );
 
         let mapper = EpochMapper::from_significant_events(passes);
 
@@ -279,9 +284,14 @@ mod tests {
     #[tokio::test]
     async fn test_get_balance_pass_not_found() {
         let tmp = tempfile::tempdir().unwrap();
-        let state = setup_with_balance_passes(tmp.path(), &[
-            make_balance_pass("Dataslate January 2025", "2025-01-20", false),
-        ]);
+        let state = setup_with_balance_passes(
+            tmp.path(),
+            &[make_balance_pass(
+                "Dataslate January 2025",
+                "2025-01-20",
+                false,
+            )],
+        );
         let app = build_router(state);
 
         let (status, _) = get_json(app, "/api/balance/nonexistent").await;
@@ -299,7 +309,10 @@ mod tests {
         let (status, json) = get_json(app, &format!("/api/balance/{}", pass_id)).await;
 
         assert_eq!(status, StatusCode::OK);
-        assert!(json["changes"].is_null(), "Pass without details should have null changes");
+        assert!(
+            json["changes"].is_null(),
+            "Pass without details should have null changes"
+        );
     }
 
     // ── Epoch List Tests ─────────────────────────────────────────
