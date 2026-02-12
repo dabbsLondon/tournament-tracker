@@ -99,9 +99,7 @@ pub async fn faction_stats(
             .filter(|p| {
                 let event_date = event_dates.get(p.event_id.as_str());
                 match event_date {
-                    Some(d) => {
-                        from_date.is_none_or(|f| *d >= f) && to_date.is_none_or(|t| *d <= t)
-                    }
+                    Some(d) => from_date.is_none_or(|f| *d >= f) && to_date.is_none_or(|t| *d <= t),
                     None => true,
                 }
             })
