@@ -11,8 +11,10 @@ env:
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
-  check:
-    name: Check
+  # ── Backend ──────────────────────────────────────────────────────
+
+  backend-check:
+    name: Backend Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,10 +41,10 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  test:
-    name: Test
+  backend-test:
+    name: Backend Test
     runs-on: ubuntu-latest
-    needs: check
+    needs: backend-check
     steps:
       - uses: actions/checkout@v4
 
@@ -64,10 +66,10 @@ jobs:
         id: test
         uses: ./.github/actions/run-tests
 
-  coverage:
-    name: Coverage
+  backend-coverage:
+    name: Backend Coverage
     runs-on: ubuntu-latest
-    needs: check
+    needs: backend-check
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +92,8 @@ jobs:
       - name: Check coverage
         id: coverage
         uses: ./.github/actions/check-coverage
+
+  # ── Frontend ─────────────────────────────────────────────────────
 
   frontend-test:
     name: Frontend Test
@@ -121,11 +125,12 @@ jobs:
           path: coverage/
           retention-days: 30
 
-  # Summary job that depends on all others
+  # ── Summary ──────────────────────────────────────────────────────
+
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [check, test, coverage, frontend-test, frontend-coverage]
+    needs: [backend-check, backend-test, backend-coverage, frontend-test, frontend-coverage]
     if: always()
     steps:
       - uses: actions/checkout@v4
@@ -133,12 +138,12 @@ jobs:
       - name: Generate summary
         uses: ./.github/actions/generate-summary
         with:
-          check_result: ${{ needs.check.result }}
-          test_result: ${{ needs.test.result }}
-          coverage_result: ${{ needs.coverage.result }}
+          check_result: ${{ needs.backend-check.result }}
+          test_result: ${{ needs.backend-test.result }}
+          coverage_result: ${{ needs.backend-coverage.result }}
           frontend_test_result: ${{ needs.frontend-test.result }}
           frontend_coverage_result: ${{ needs.frontend-coverage.result }}
 
       - name: All checks passed
-        if: needs.check.result == 'success' && needs.test.result == 'success' && needs.coverage.result == 'success' && needs.frontend-test.result == 'success' && needs.frontend-coverage.result == 'success'
+        if: needs.backend-check.result == 'success' && needs.backend-test.result == 'success' && needs.backend-coverage.result == 'success' && needs.frontend-test.result == 'success' && needs.frontend-coverage.result == 'success'
         run: echo "✅ All CI checks passed!"
