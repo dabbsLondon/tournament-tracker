@@ -1,0 +1,159 @@
+# =============================================================================
+# Docker Build & Publish
+#
+# Builds two images — backend (Rust/Axum) and frontend (Nginx) — for both
+# linux/amd64 and linux/arm64 (Apple Silicon Mac M1/M2/M3).
+#
+# On pull requests : build only (validate Dockerfiles compile correctly).
+# On push to main  : build + push images to GitHub Container Registry (GHCR).
+#
+# Images are published at:
+#   ghcr.io/<owner>/<repo>/backend:<tag>
+#   ghcr.io/<owner>/<repo>/frontend:<tag>
+#
+# Tags:
+#   latest        — most recent push to main
+#   sha-<commit>  — immutable per-commit tag
+# =============================================================================
+
+name: Docker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # Rebuild whenever source code or Docker config changes
+      - "src/**"
+      - "static/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile.backend"
+      - "Dockerfile.frontend"
+      - "docker/**"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "static/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile.backend"
+      - "Dockerfile.frontend"
+      - "docker/**"
+      - ".github/workflows/docker.yml"
+
+env:
+  REGISTRY: ghcr.io
+  # e.g. ghcr.io/dabbslondon/tournament-tracker
+  IMAGE_BASE: ghcr.io/${{ github.repository }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Backend image (Rust / Axum)
+  # ---------------------------------------------------------------------------
+  build-backend:
+    name: Build backend image
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write  # Required to push to GHCR
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # QEMU enables emulation of arm64 on the amd64 GitHub runner
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # Buildx is required for multi-platform builds
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only log in to GHCR when we actually want to push (not on PRs)
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate image tags and labels from git metadata
+      - name: Extract Docker metadata (backend)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_BASE }}/backend
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.backend
+          # Build for Intel Macs/Linux (amd64) AND Apple Silicon (arm64)
+          platforms: linux/amd64,linux/arm64
+          # Only push on merges to main; PRs just build to validate
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          # Cache Docker layers in GitHub Actions cache between runs
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  # ---------------------------------------------------------------------------
+  # Frontend image (Nginx + static files)
+  # ---------------------------------------------------------------------------
+  build-frontend:
+    name: Build frontend image
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata (frontend)
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_BASE }}/frontend
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.frontend
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend

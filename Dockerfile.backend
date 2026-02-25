@@ -1,0 +1,67 @@
+# =============================================================================
+# Dockerfile.backend
+# Multi-stage build for the Rust/Axum API server.
+# Uses cargo-chef for efficient dependency layer caching.
+#
+# Supports linux/amd64 and linux/arm64 (Apple Silicon M1/M2/M3).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Install cargo-chef
+# -----------------------------------------------------------------------------
+FROM rust:1.82-bookworm AS chef
+RUN cargo install cargo-chef --locked
+WORKDIR /app
+
+# -----------------------------------------------------------------------------
+# Stage 2: Compute the dependency recipe (based on Cargo.toml / Cargo.lock)
+# -----------------------------------------------------------------------------
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo chef prepare --recipe-path recipe.json
+
+# -----------------------------------------------------------------------------
+# Stage 3: Build dependencies (this layer is cached unless Cargo files change)
+# -----------------------------------------------------------------------------
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Now build the real application
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+# Include static files so the backend can serve them standalone if needed
+COPY static ./static
+RUN cargo build --release --bin meta-agent
+
+# -----------------------------------------------------------------------------
+# Stage 4: Minimal runtime image
+# -----------------------------------------------------------------------------
+FROM debian:bookworm-slim AS runtime
+
+# Install runtime dependencies:
+#   ca-certificates — for HTTPS requests (reqwest / Anthropic API)
+#   libssl3         — native-tls support (reqwest default TLS backend)
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the compiled binary
+COPY --from=builder /app/target/release/meta-agent /app/meta-agent
+
+# Copy static files (lets the backend serve the UI when running standalone)
+COPY --from=builder /app/static /app/static
+
+# Data directory — mount a volume here in production to persist scraped data
+RUN mkdir -p /app/data
+
+EXPOSE 3000
+
+ENV RUST_LOG=info
+
+# Bind to 0.0.0.0 so the container is reachable from outside
+CMD ["/app/meta-agent", "serve", "--host", "0.0.0.0", "--port", "3000"]
