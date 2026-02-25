@@ -63,7 +63,19 @@ pub async fn faction_stats(
     State(state): State<AppState>,
     Query(params): Query<FactionStatsParams>,
 ) -> Result<Json<FactionStatsResponse>, ApiError> {
-    let epoch = resolve_epoch(params.epoch.as_deref(), &state.epoch_mapper)?;
+    let mapper = state.epoch_mapper.read().await;
+
+    // Support epoch=all to load from every epoch
+    let epoch_ids: Vec<String> = if params.epoch.as_deref() == Some("all") {
+        let epochs = mapper.all_epochs();
+        if epochs.is_empty() {
+            vec!["current".to_string()]
+        } else {
+            epochs.iter().map(|e| e.id.as_str().to_string()).collect()
+        }
+    } else {
+        vec![resolve_epoch(params.epoch.as_deref(), &mapper)?]
+    };
 
     // Parse optional date range filters
     let from_date = params
@@ -75,21 +87,27 @@ pub async fn faction_stats(
         .as_deref()
         .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
-    let reader =
-        JsonlReader::<Placement>::for_entity(&state.storage, EntityType::Placement, &epoch);
-    let placements = reader
-        .read_all()
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let placements = dedup_by_id(placements, |p| p.id.as_str());
+    let mut all_placements = Vec::new();
+    let mut all_events = Vec::new();
+    for epoch_id in &epoch_ids {
+        let reader =
+            JsonlReader::<Placement>::for_entity(&state.storage, EntityType::Placement, epoch_id);
+        if let Ok(mut p) = reader.read_all() {
+            all_placements.append(&mut p);
+        }
+        if from_date.is_some() || to_date.is_some() {
+            let event_reader =
+                JsonlReader::<Event>::for_entity(&state.storage, EntityType::Event, epoch_id);
+            if let Ok(mut e) = event_reader.read_all() {
+                all_events.append(&mut e);
+            }
+        }
+    }
+    let placements = dedup_by_id(all_placements, |p| p.id.as_str());
 
-    // If date filtering, read events to get event dates and filter placements
+    // If date filtering, filter placements by event date
     let placements = if from_date.is_some() || to_date.is_some() {
-        let event_reader =
-            JsonlReader::<Event>::for_entity(&state.storage, EntityType::Event, &epoch);
-        let events = event_reader
-            .read_all()
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-        let event_dates: HashMap<String, chrono::NaiveDate> = events
+        let event_dates: HashMap<String, chrono::NaiveDate> = all_events
             .into_iter()
             .map(|e| (e.id.as_str().to_string(), e.date))
             .collect();
@@ -109,12 +127,15 @@ pub async fn faction_stats(
     };
 
     // Read army lists for unit popularity
-    let list_reader =
-        JsonlReader::<ArmyList>::for_entity(&state.storage, EntityType::ArmyList, &epoch);
-    let all_lists = list_reader
-        .read_all()
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let all_lists = dedup_by_id(all_lists, |l| l.id.as_str());
+    let mut all_lists_raw = Vec::new();
+    for epoch_id in &epoch_ids {
+        let list_reader =
+            JsonlReader::<ArmyList>::for_entity(&state.storage, EntityType::ArmyList, epoch_id);
+        if let Ok(mut lists) = list_reader.read_all() {
+            all_lists_raw.append(&mut lists);
+        }
+    }
+    let all_lists = dedup_by_id(all_lists_raw, |l| l.id.as_str());
 
     // Index army lists by normalized faction name
     let mut lists_by_faction: HashMap<String, Vec<&ArmyList>> = HashMap::new();
@@ -272,7 +293,8 @@ pub async fn faction_detail(
     Path(faction_name): Path<String>,
     Query(params): Query<FactionDetailParams>,
 ) -> Result<Json<FactionDetailResponse>, ApiError> {
-    let epoch = resolve_epoch(params.epoch.as_deref(), &state.epoch_mapper)?;
+    let mapper = state.epoch_mapper.read().await;
+    let epoch = resolve_epoch(params.epoch.as_deref(), &mapper)?;
     // Read placements for this faction (winners and top-4)
     let placement_reader =
         JsonlReader::<Placement>::for_entity(&state.storage, EntityType::Placement, &epoch);
@@ -494,7 +516,8 @@ pub async fn allegiance_stats(
     State(state): State<AppState>,
     Query(params): Query<AllegianceStatsParams>,
 ) -> Result<Json<AllegianceStatsResponse>, ApiError> {
-    let epoch = resolve_epoch(params.epoch.as_deref(), &state.epoch_mapper)?;
+    let mapper = state.epoch_mapper.read().await;
+    let epoch = resolve_epoch(params.epoch.as_deref(), &mapper)?;
 
     let reader =
         JsonlReader::<Placement>::for_entity(&state.storage, EntityType::Placement, &epoch);
@@ -589,7 +612,14 @@ mod tests {
         std::fs::create_dir_all(&epoch_dir).unwrap();
         AppState {
             storage: Arc::new(storage),
-            epoch_mapper: Arc::new(EpochMapper::new()),
+            epoch_mapper: Arc::new(tokio::sync::RwLock::new(EpochMapper::new())),
+            refresh_state: Arc::new(tokio::sync::RwLock::new(
+                crate::api::routes::refresh::RefreshState::default(),
+            )),
+            ai_backend: Arc::new(crate::agents::backend::MockBackend::new("{}")),
+            traffic_stats: std::sync::Arc::new(tokio::sync::RwLock::new(
+                crate::api::routes::traffic::TrafficStats::new(),
+            )),
         }
     }
 

@@ -21,6 +21,7 @@ pub enum EntityType {
     Placement,
     ArmyList,
     ReviewItem,
+    Pairing,
 }
 
 impl EntityType {
@@ -32,6 +33,7 @@ impl EntityType {
             EntityType::Placement => "placements.jsonl",
             EntityType::ArmyList => "army_lists.jsonl",
             EntityType::ReviewItem => "review_items.jsonl",
+            EntityType::Pairing => "pairings.jsonl",
         }
     }
 }

@@ -146,7 +146,7 @@ Given raw list text, extract:
 - faction: Main faction — MUST be one of the canonical faction names listed below
 - subfaction: Subfaction if applicable (Chapter, Craftworld, etc.)
 - allegiance: Allegiance group — "Imperium", "Chaos", or "Xenos"
-- detachment: Detachment name
+- detachment: Detachment name (see DETACHMENT EXTRACTION below)
 - total_points: Total army points
 - units: Array of units with:
   - name: Unit name (canonical GW name)
@@ -255,6 +255,18 @@ Additional keywords to include when applicable:
   "Fly"                — Units that can fly
   "Swarm"              — Swarm units
   "Beast"              — Beast units
+
+DETACHMENT EXTRACTION:
+- The detachment is a specific rules choice for the army, NOT the game size or organization type.
+- NEVER use "Strike Force", "Incursion", "Onslaught", or "Combat Patrol" as detachment values — these are game sizes.
+- NEVER use "Battalion", "Patrol", "Brigade", "Vanguard", "Spearhead", "Outrider" as detachments — these are old 9th-edition organization types.
+- Common list formats show the detachment in different locations:
+  1. After a "Detachment:" or "DETACHMENT:" header line
+  2. On its own line between the faction name and the "Strike Force (X points)" line
+  3. On its own line AFTER the "Strike Force (X points)" line (variant format)
+- Example: If the list says "Astra Militarum\nStrike Force (2000 points)\nGrizzled Company" then the detachment is "Grizzled Company", NOT "Strike Force".
+- Example: If the list says "Ultramarines\nBlade of Ultramar\nStrike Force (2000 points)" then the detachment is "Blade of Ultramar".
+- When in doubt, look for the line that is NOT a faction name and NOT a game size — that is the detachment.
 
 Handle various list formats:
 - Battlescribe exports

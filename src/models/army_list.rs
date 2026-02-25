@@ -4,7 +4,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::{ArmyListId, Confidence, EntityId};
+use super::{ArmyListId, Confidence, EntityId, EventId};
 
 /// A unit in an army list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +90,10 @@ pub struct ArmyList {
     /// Date the list was played (from the event)
     pub event_date: Option<NaiveDate>,
 
+    /// Event this list was played at
+    #[serde(default)]
+    pub event_id: Option<EventId>,
+
     /// Source URL
     pub source_url: Option<String>,
 
@@ -132,6 +136,7 @@ impl ArmyList {
             raw_text,
             player_name: None,
             event_date: None,
+            event_id: None,
             source_url: None,
             created_at: Utc::now(),
             extraction_confidence: Confidence::default(),
@@ -185,6 +190,12 @@ impl ArmyList {
     /// Builder method to set source URL.
     pub fn with_source_url(mut self, url: String) -> Self {
         self.source_url = Some(url);
+        self
+    }
+
+    /// Builder method to set event ID.
+    pub fn with_event_id(mut self, event_id: EventId) -> Self {
+        self.event_id = Some(event_id);
         self
     }
 

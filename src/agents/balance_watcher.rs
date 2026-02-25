@@ -77,7 +77,12 @@ impl BalanceWatcherAgent {
         response: &str,
         source_url: &str,
     ) -> Result<Vec<AgentOutput<SignificantEvent>>, AgentError> {
-        let parsed: BalanceWatcherResponse = serde_json::from_str(response)
+        let trimmed = response.trim();
+        if trimmed.is_empty() {
+            tracing::warn!("Balance watcher: AI returned empty response, treating as no updates");
+            return Ok(Vec::new());
+        }
+        let parsed: BalanceWatcherResponse = serde_json::from_str(trimmed)
             .map_err(|e| AgentError::ResponseParseError(format!("Invalid JSON: {}", e)))?;
 
         let mut results = Vec::new();

@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::api::state::AppState;
 use crate::api::ApiError;
-use crate::models::{BalanceChanges, Event, SignificantEventType};
+use crate::models::{BalanceChanges, Event, Placement, SignificantEventType};
 use crate::storage::{self, EntityType, JsonlReader};
 
 #[derive(Debug, Serialize)]
@@ -15,6 +15,7 @@ pub struct Epoch {
     pub start_date: Option<String>,
     pub end_date: Option<String>,
     pub event_count: u32,
+    pub placement_count: u32,
     pub balance_pass_id: Option<String>,
     pub balance_pass_title: Option<String>,
 }
@@ -25,7 +26,7 @@ pub struct EpochsResponse {
 }
 
 pub async fn list_epochs(State(state): State<AppState>) -> Result<Json<EpochsResponse>, ApiError> {
-    let mapper = &state.epoch_mapper;
+    let mapper = state.epoch_mapper.read().await;
 
     // Load significant events for balance pass info
     let sig_events = storage::read_significant_events(&state.storage).unwrap_or_default();
@@ -35,6 +36,11 @@ pub async fn list_epochs(State(state): State<AppState>) -> Result<Json<EpochsRes
             .read_all()
             .map(|v| v.len() as u32)
             .unwrap_or(0);
+        let pcount =
+            JsonlReader::<Placement>::for_entity(&state.storage, EntityType::Placement, "current")
+                .read_all()
+                .map(|v| v.len() as u32)
+                .unwrap_or(0);
         return Ok(Json(EpochsResponse {
             epochs: vec![Epoch {
                 id: "current".to_string(),
@@ -43,6 +49,7 @@ pub async fn list_epochs(State(state): State<AppState>) -> Result<Json<EpochsRes
                 start_date: None,
                 end_date: None,
                 event_count: count,
+                placement_count: pcount,
                 balance_pass_id: None,
                 balance_pass_title: None,
             }],
@@ -59,6 +66,14 @@ pub async fn list_epochs(State(state): State<AppState>) -> Result<Json<EpochsRes
                     .read_all()
                     .map(|v| v.len() as u32)
                     .unwrap_or(0);
+            let pcount = JsonlReader::<Placement>::for_entity(
+                &state.storage,
+                EntityType::Placement,
+                epoch_id,
+            )
+            .read_all()
+            .map(|v| v.len() as u32)
+            .unwrap_or(0);
 
             // Find the balance pass that started this epoch
             let balance_pass = sig_events.iter().find(|se| se.id == e.start_event_id);
@@ -70,6 +85,7 @@ pub async fn list_epochs(State(state): State<AppState>) -> Result<Json<EpochsRes
                 start_date: Some(e.start_date.to_string()),
                 end_date: e.end_date.map(|d| d.to_string()),
                 event_count: count,
+                placement_count: pcount,
                 balance_pass_id: balance_pass.map(|bp| bp.id.as_str().to_string()),
                 balance_pass_title: balance_pass.map(|bp| bp.title.clone()),
             }
@@ -234,7 +250,14 @@ mod tests {
 
         AppState {
             storage: Arc::new(storage),
-            epoch_mapper: Arc::new(mapper),
+            epoch_mapper: Arc::new(tokio::sync::RwLock::new(mapper)),
+            refresh_state: Arc::new(tokio::sync::RwLock::new(
+                crate::api::routes::refresh::RefreshState::default(),
+            )),
+            ai_backend: Arc::new(crate::agents::backend::MockBackend::new("{}")),
+            traffic_stats: std::sync::Arc::new(tokio::sync::RwLock::new(
+                crate::api::routes::traffic::TrafficStats::new(),
+            )),
         }
     }
 
@@ -353,7 +376,14 @@ mod tests {
 
         let state = AppState {
             storage: Arc::new(storage),
-            epoch_mapper: Arc::new(EpochMapper::new()),
+            epoch_mapper: Arc::new(tokio::sync::RwLock::new(EpochMapper::new())),
+            refresh_state: Arc::new(tokio::sync::RwLock::new(
+                crate::api::routes::refresh::RefreshState::default(),
+            )),
+            ai_backend: Arc::new(crate::agents::backend::MockBackend::new("{}")),
+            traffic_stats: std::sync::Arc::new(tokio::sync::RwLock::new(
+                crate::api::routes::traffic::TrafficStats::new(),
+            )),
         };
         let app = build_router(state);
 

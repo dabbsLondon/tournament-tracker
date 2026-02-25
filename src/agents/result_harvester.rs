@@ -198,7 +198,7 @@ For each placing player, extract:
 - player_name: Player name as shown
 - faction: Main faction — MUST be one of the canonical faction names listed below
 - subfaction: Subfaction if mentioned (e.g., "Ynnari", "Ultramarines")
-- detachment: Detachment name if shown
+- detachment: Detachment name if shown (see DETACHMENT RULES below)
 - wins: Number of wins (integer, null if not shown)
 - losses: Number of losses (integer, null if not shown)
 - draws: Number of draws (integer, null if not shown)
@@ -267,6 +267,14 @@ Return JSON in this exact format:
 }
 
 If no placements found, return: {"placements": []}
+
+DETACHMENT RULES:
+- A detachment is a specific rules choice, NOT the game size or army organization.
+- "Strike Force", "Incursion", "Onslaught", "Combat Patrol" are GAME SIZES, not detachments. Never use these as detachment values.
+- "Battalion", "Patrol", "Brigade", "Vanguard", "Spearhead", "Outrider" are old 9th-edition organization types, not 10th-edition detachments.
+- If the article says a player used a specific detachment (e.g. "Blade of Ultramar", "Grizzled Company", "Pactbound Zealots"), use that exact name.
+- If a full army list is embedded, look for the detachment name on its own line (usually between the faction name and the "Strike Force (X points)" line, or after a "Detachment:" header).
+- If the detachment is unclear, set it to null rather than guessing.
 
 IMPORTANT:
 - Extract placements in order (1st, 2nd, 3rd...)

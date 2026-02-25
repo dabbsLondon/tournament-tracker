@@ -9,9 +9,11 @@ pub mod state;
 use std::collections::HashSet;
 
 use axum::{
+    extract::ConnectInfo,
     http::StatusCode,
+    middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use serde::Serialize;
@@ -46,11 +48,75 @@ pub fn build_router(state: AppState) -> Router {
             "/api/analytics/players",
             get(routes::analytics::top_players),
         )
-        .route("/api/analytics/units", get(routes::analytics::top_units));
+        .route("/api/analytics/units", get(routes::analytics::top_units))
+        .route("/api/refresh/preview", get(routes::refresh::preview))
+        .route("/api/refresh", post(routes::refresh::start_refresh))
+        .route("/api/refresh/status", get(routes::refresh::status))
+        .route(
+            "/api/analytics/detachments",
+            get(routes::analytics::detachment_stats),
+        )
+        .route(
+            "/api/analytics/unit-performance",
+            get(routes::analytics::unit_performance),
+        )
+        .route(
+            "/api/analytics/points-efficiency",
+            get(routes::analytics::points_efficiency),
+        )
+        .route("/api/analytics/matchups", get(routes::analytics::matchups))
+        .route(
+            "/api/analytics/archetypes",
+            get(routes::analytics::archetypes),
+        )
+        .route(
+            "/api/analytics/win-rates",
+            get(routes::analytics::win_rates),
+        )
+        .route(
+            "/api/analytics/composite-scores",
+            get(routes::analytics::composite_scores),
+        )
+        .route("/api/traffic", get(routes::traffic::traffic_stats))
+        .route("/api/traffic/geo", get(routes::traffic::geo_lookup));
+
+    let traffic = state.traffic_stats.clone();
 
     Router::new()
         .merge(api)
         .fallback_service(ServeDir::new("static"))
+        .layer(middleware::from_fn(
+            move |req: axum::extract::Request, next: Next| {
+                let stats = traffic.clone();
+                async move {
+                    // Try X-Forwarded-For / X-Real-IP first (reverse proxy),
+                    // then ConnectInfo (direct connection)
+                    let ip = req
+                        .headers()
+                        .get("x-forwarded-for")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|v| v.split(',').next().unwrap_or("").trim().to_string())
+                        .or_else(|| {
+                            req.headers()
+                                .get("x-real-ip")
+                                .and_then(|v| v.to_str().ok())
+                                .map(|v| v.trim().to_string())
+                        })
+                        .or_else(|| {
+                            req.extensions()
+                                .get::<ConnectInfo<std::net::SocketAddr>>()
+                                .map(|ci| ci.0.ip().to_string())
+                        })
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let path = req.uri().path().to_string();
+                    {
+                        let mut s = stats.write().await;
+                        s.record(&ip, &path);
+                    }
+                    next.run(req).await
+                }
+            },
+        ))
         .layer(CorsLayer::new().allow_origin(Any))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -107,6 +173,12 @@ pub enum ApiError {
     #[error("Bad request: {0}")]
     BadRequest(String),
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -128,6 +200,8 @@ impl IntoResponse for ApiError {
         let (status, code) = match &self {
             ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND"),
             ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "BAD_REQUEST"),
+            ApiError::Conflict(_) => (StatusCode::CONFLICT, "CONFLICT"),
+            ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "FORBIDDEN"),
             ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),
         };
 
@@ -162,7 +236,7 @@ impl Pagination {
     pub fn new(page: Option<u32>, page_size: Option<u32>) -> Self {
         Self {
             page: page.unwrap_or(1).max(1),
-            page_size: page_size.unwrap_or(50).clamp(1, 100),
+            page_size: page_size.unwrap_or(50).clamp(1, 500),
         }
     }
 
@@ -222,9 +296,9 @@ mod tests {
         let p = Pagination::new(Some(0), Some(50));
         assert_eq!(p.page, 1);
 
-        // Page size max is 100
+        // Page size max is 500
         let p = Pagination::new(Some(1), Some(200));
-        assert_eq!(p.page_size, 100);
+        assert_eq!(p.page_size, 200);
     }
 
     #[test]
@@ -383,5 +457,21 @@ mod tests {
         let items: Vec<String> = vec![];
         let deduped = dedup_by_id(items, |s| s.as_str());
         assert!(deduped.is_empty());
+    }
+
+    #[test]
+    fn test_api_error_conflict() {
+        use axum::response::IntoResponse;
+        let error = ApiError::Conflict("already exists".to_string());
+        let response = error.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn test_api_error_forbidden() {
+        use axum::response::IntoResponse;
+        let error = ApiError::Forbidden("not allowed".to_string());
+        let response = error.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
     }
 }

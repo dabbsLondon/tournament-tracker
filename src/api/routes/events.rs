@@ -536,6 +536,9 @@ pub struct ListEventsParams {
     pub to: Option<String>,
     pub epoch: Option<String>,
     pub has_results: Option<bool>,
+    pub q: Option<String>,
+    pub min_players: Option<u32>,
+    pub max_players: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -569,13 +572,45 @@ pub async fn list_events(
     State(state): State<AppState>,
     Query(params): Query<ListEventsParams>,
 ) -> Result<Json<EventListResponse>, ApiError> {
-    let epoch = resolve_epoch(params.epoch.as_deref(), &state.epoch_mapper)?;
-    let reader = JsonlReader::<Event>::for_entity(&state.storage, EntityType::Event, &epoch);
-    let mut events = reader
-        .read_all()
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let mapper = state.epoch_mapper.read().await;
+
+    // Support epoch=all to load events from every epoch (used by calendar)
+    let epoch_ids: Vec<String> = if params.epoch.as_deref() == Some("all") {
+        let epochs = mapper.all_epochs();
+        if epochs.is_empty() {
+            vec!["current".to_string()]
+        } else {
+            epochs.iter().map(|e| e.id.as_str().to_string()).collect()
+        }
+    } else {
+        vec![resolve_epoch(params.epoch.as_deref(), &mapper)?]
+    };
+
+    let mut events: Vec<Event> = Vec::new();
+    let mut placements: Vec<Placement> = Vec::new();
+    let mut lists: Vec<ArmyList> = Vec::new();
+
+    for epoch_id in &epoch_ids {
+        let reader = JsonlReader::<Event>::for_entity(&state.storage, EntityType::Event, epoch_id);
+        if let Ok(mut epoch_events) = reader.read_all() {
+            events.append(&mut epoch_events);
+        }
+
+        let p_reader =
+            JsonlReader::<Placement>::for_entity(&state.storage, EntityType::Placement, epoch_id);
+        if let Ok(mut epoch_placements) = p_reader.read_all() {
+            placements.append(&mut epoch_placements);
+        }
+
+        let l_reader =
+            JsonlReader::<ArmyList>::for_entity(&state.storage, EntityType::ArmyList, epoch_id);
+        if let Ok(mut epoch_lists) = l_reader.read_all() {
+            lists.append(&mut epoch_lists);
+        }
+    }
 
     events = dedup_by_id(events, |e| e.id.as_str());
+    let placements = dedup_by_id(placements, |p| p.id.as_str());
 
     // Filter by date range
     if let Some(ref from) = params.from {
@@ -589,16 +624,27 @@ pub async fn list_events(
         }
     }
 
+    // Filter by search query (name or location, case-insensitive)
+    if let Some(ref query) = params.q {
+        let q_lower = query.to_lowercase();
+        events.retain(|e| {
+            e.name.to_lowercase().contains(&q_lower)
+                || e.location
+                    .as_ref()
+                    .is_some_and(|l| l.to_lowercase().contains(&q_lower))
+        });
+    }
+
+    // Filter by player count
+    if let Some(min) = params.min_players {
+        events.retain(|e| e.player_count.unwrap_or(0) >= min);
+    }
+    if let Some(max) = params.max_players {
+        events.retain(|e| e.player_count.unwrap_or(0) <= max);
+    }
+
     // Sort by date descending
     events.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.name.cmp(&b.name)));
-
-    // Read placements to find winners
-    let placement_reader =
-        JsonlReader::<Placement>::for_entity(&state.storage, EntityType::Placement, &epoch);
-    let placements = placement_reader
-        .read_all()
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let placements = dedup_by_id(placements, |p| p.id.as_str());
 
     let today = chrono::Utc::now().date_naive();
     let event_ids_with_placements: std::collections::HashSet<&str> =
@@ -607,16 +653,30 @@ pub async fn list_events(
     // Filter to only events that have at least one placement (results)
     // Also exclude future events — they can't have legitimate results
     if params.has_results.unwrap_or(false) {
-        events.retain(|e| event_ids_with_placements.contains(e.id.as_str()) && e.date <= today);
+        events.retain(|e| event_ids_with_placements.contains(e.id.as_str()));
     }
-
-    // Read army lists to determine which events have lists
-    let list_reader =
-        JsonlReader::<ArmyList>::for_entity(&state.storage, EntityType::ArmyList, &epoch);
-    let lists = list_reader.read_all().unwrap_or_default();
-    let urls_with_lists: std::collections::HashSet<&str> = lists
+    let list_player_names: std::collections::HashSet<String> = lists
         .iter()
-        .filter_map(|l| l.source_url.as_deref())
+        .filter_map(|l| l.player_name.as_ref())
+        .map(|n| {
+            n.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        })
+        .collect();
+    let events_with_lists: std::collections::HashSet<&str> = placements
+        .iter()
+        .filter(|p| {
+            let normalized = p
+                .player_name
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            list_player_names.contains(&normalized)
+        })
+        .map(|p| p.event_id.as_str())
         .collect();
 
     let pagination = Pagination::new(params.page, params.page_size);
@@ -643,8 +703,21 @@ pub async fn list_events(
                     detachment: p.detachment.clone(),
                 });
 
-            let completed =
-                event.date <= today && event_ids_with_placements.contains(event.id.as_str());
+            let has_placements = event_ids_with_placements.contains(event.id.as_str());
+            // "completed" = has placement data.
+            // "expected" = we expect this event to have results (enough players, old enough).
+            // Events with <10 players or within last 3 days are not expected to have data.
+            let too_small = event.player_count.unwrap_or(0) < 10;
+            let too_recent = event.date >= today - chrono::Days::new(3);
+            let completed = if has_placements {
+                true
+            } else if event.date > today {
+                false // future
+            } else if too_small || too_recent {
+                true // don't show as missing — too small/recent
+            } else {
+                false
+            };
 
             EventSummary {
                 id: event.id.as_str().to_string(),
@@ -655,7 +728,7 @@ pub async fn list_events(
                 round_count: event.round_count,
                 source_url: event.source_url.clone(),
                 winner,
-                has_lists: urls_with_lists.contains(event.source_url.as_str()),
+                has_lists: events_with_lists.contains(event.id.as_str()),
                 completed,
             }
         })
@@ -705,6 +778,14 @@ pub struct ArmyListDetail {
 }
 
 #[derive(Debug, Serialize)]
+pub struct UnmatchedEventList {
+    pub player_name: Option<String>,
+    pub faction: Option<String>,
+    pub detachment: Option<String>,
+    pub list: ArmyListDetail,
+}
+
+#[derive(Debug, Serialize)]
 pub struct EventDetailResponse {
     pub id: String,
     pub name: String,
@@ -714,6 +795,7 @@ pub struct EventDetailResponse {
     pub round_count: Option<u32>,
     pub source_url: String,
     pub placements: Vec<PlacementDetail>,
+    pub unmatched_lists: Vec<UnmatchedEventList>,
 }
 
 /// Parse the actual faction name from an army list's raw_text.
@@ -776,8 +858,34 @@ pub fn parse_faction_from_raw(raw: &str) -> Option<String> {
     None
 }
 
+/// Game sizes that must NOT be treated as detachment names.
+const GAME_SIZES: &[&str] = &[
+    "strike force",
+    "incursion",
+    "onslaught",
+    "combat patrol",
+    "battalion",
+    "patrol",
+    "brigade",
+    "vanguard",
+    "spearhead",
+    "outrider",
+];
+
+/// Check if a line is a game-size label (not a detachment).
+fn is_game_size_line(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    GAME_SIZES.iter().any(|gs| lower.starts_with(gs))
+}
+
 /// Parse detachment from raw_text.
+///
+/// Handles multiple formats:
+/// 1. Header style: `DETACHMENT: Grizzled Company (Ruthless Discipline)`
+/// 2. Free-standing: detachment on its own line near the top, between faction
+///    and game-size line, or right after the game-size line.
 pub fn parse_detachment_from_raw(raw: &str) -> Option<String> {
+    // Pass 1: Look for explicit DETACHMENT: header
     for line in raw.lines() {
         let line = line.trim().trim_start_matches('+').trim();
         let upper = line.to_uppercase();
@@ -788,7 +896,62 @@ pub fn parse_detachment_from_raw(raw: &str) -> Option<String> {
             return Some(det.to_string());
         }
     }
+
+    // Pass 2: Free-standing format — scan the first ~15 non-empty lines
+    // for a line that is NOT a faction, NOT a game size, NOT a section header,
+    // and appears near the faction/game-size cluster at the top.
+    let non_empty: Vec<&str> = raw
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('+') && !l.starts_with('#'))
+        .take(15)
+        .collect();
+
+    // Find the game-size line index
+    let gs_idx = non_empty.iter().position(|l| is_game_size_line(l));
+
+    if let Some(gi) = gs_idx {
+        // Check the line immediately after the game-size line
+        if gi + 1 < non_empty.len() {
+            let candidate = non_empty[gi + 1];
+            if !is_section_header(candidate)
+                && !is_game_size_line(candidate)
+                && lookup_faction(candidate).is_none()
+                && !candidate.contains("points")
+                && !candidate.contains("Points")
+            {
+                return Some(candidate.to_string());
+            }
+        }
+        // Check the line immediately before the game-size line
+        if gi > 0 {
+            let candidate = non_empty[gi - 1];
+            if !is_section_header(candidate)
+                && !is_game_size_line(candidate)
+                && lookup_faction(candidate).is_none()
+                && !candidate.contains("points")
+                && !candidate.contains("Points")
+            {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
     None
+}
+
+/// Check if a line is a section header like "CHARACTERS", "BATTLELINE", etc.
+fn is_section_header(line: &str) -> bool {
+    let headers = [
+        "CHARACTERS",
+        "BATTLELINE",
+        "OTHER DATASHEETS",
+        "DEDICATED TRANSPORTS",
+        "ALLIED UNITS",
+        "FORTIFICATIONS",
+    ];
+    let upper = line.to_uppercase();
+    headers.iter().any(|h| upper == *h)
 }
 
 /// Convert a model Unit to an API UnitDetail.
@@ -884,79 +1047,87 @@ pub fn army_list_to_detail(l: &ArmyList) -> ArmyListDetail {
     }
 }
 
-/// Match army lists to placements by player name, falling back to faction+detachment
-/// for legacy lists that don't have player_name set.
+/// Match army lists to placements using two passes:
 ///
-/// Lists are filtered to the same event (via source_url), so date matching
-/// is implicit.
+/// 1. **Player name** (across ALL lists) — definitive match.
+/// 2. **Faction + detachment** (same source URL only) — weaker signal,
+///    restricted to lists from the same article so we don't cross-contaminate
+///    across tournaments.
+///
+/// Any lists that remain unmatched are NOT returned — they will appear on
+/// faction pages instead of the tournament page.
 fn match_lists_to_placements(
     placements: &mut [PlacementDetail],
     lists: Vec<ArmyList>,
     event_source_url: &str,
-) {
+    event_id: &str,
+) -> Vec<UnmatchedEventList> {
     let mut candidates: Vec<(ArmyList, ArmyListDetail)> = lists
         .into_iter()
-        .filter(|l| l.source_url.as_deref() == Some(event_source_url))
         .map(|l| {
             let detail = army_list_to_detail(&l);
             (l, detail)
         })
         .collect();
 
+    // Pass 1: Match by player name, preferring same-event lists
     for placement in placements.iter_mut() {
-        // First: try exact player name match
-        let matched = candidates.iter().position(|(l, _)| {
-            l.player_name
-                .as_ref()
-                .is_some_and(|name| player_names_match(&placement.player_name, name))
-        });
-
-        // Fallback: faction + detachment match for lists without player_name
-        let matched = matched.or_else(|| {
-            let mut scored: Vec<(usize, u32)> = Vec::new();
-
-            for (i, (_, detail)) in candidates.iter().enumerate() {
-                let mut score: u32 = 0;
-                let list_faction = detail.parsed_faction.as_deref().unwrap_or("");
-                if !list_faction.is_empty() {
-                    score += faction_match_score(&placement.faction, list_faction);
-                }
-                if let (Some(ref pd), Some(ref ld)) =
-                    (&placement.detachment, &detail.parsed_detachment)
-                {
-                    if pd.eq_ignore_ascii_case(ld) {
-                        score += 5;
-                    }
-                }
-                if score > 0 {
-                    scored.push((i, score));
-                }
-            }
-
-            scored.sort_by(|a, b| b.1.cmp(&a.1));
-
-            // If faction+detachment match (score 8+), always accept
-            if let Some(&(idx, score)) = scored.first() {
-                if score >= 8 {
-                    return Some(idx);
-                }
-            }
-
-            // If there's exactly one faction match (score 3+), accept it —
-            // this handles cases where player name is missing but faction is clear
-            let faction_matches: Vec<_> = scored.iter().filter(|&&(_, s)| s >= 3).collect();
-            if faction_matches.len() == 1 {
-                return Some(faction_matches[0].0);
-            }
-
-            None
-        });
+        // First try: same event_id + player name (definitive)
+        let matched = candidates
+            .iter()
+            .position(|(l, _)| {
+                l.event_id
+                    .as_ref()
+                    .is_some_and(|eid| eid.as_str() == event_id)
+                    && l.player_name
+                        .as_ref()
+                        .is_some_and(|name| player_names_match(&placement.player_name, name))
+            })
+            .or_else(|| {
+                // Fallback: any list with matching player name
+                candidates.iter().position(|(l, _)| {
+                    l.player_name
+                        .as_ref()
+                        .is_some_and(|name| player_names_match(&placement.player_name, name))
+                })
+            });
 
         if let Some(idx) = matched {
             let (_, detail) = candidates.remove(idx);
             placement.army_list = Some(detail);
         }
     }
+
+    // Pass 2: Match by faction+detachment (same source URL only)
+    // Only considers lists from the same article to avoid cross-event matches.
+    for placement in placements.iter_mut() {
+        if placement.army_list.is_some() {
+            continue;
+        }
+        let det = match &placement.detachment {
+            Some(d) if !d.is_empty() => d.as_str(),
+            _ => continue,
+        };
+        let matched = candidates.iter().position(|(l, detail)| {
+            l.source_url.as_deref() == Some(event_source_url)
+                && detail
+                    .parsed_detachment
+                    .as_deref()
+                    .is_some_and(|d| d.eq_ignore_ascii_case(det))
+                && detail
+                    .parsed_faction
+                    .as_ref()
+                    .is_some_and(|f| faction_match_score(f, &placement.faction) > 0)
+        });
+        if let Some(idx) = matched {
+            let (_, detail) = candidates.remove(idx);
+            placement.army_list = Some(detail);
+        }
+    }
+
+    // Remaining candidates either belong to other events or don't match
+    // any placement — they'll appear on faction pages instead.
+    Vec::new()
 }
 
 #[derive(Debug, Deserialize)]
@@ -969,7 +1140,8 @@ pub async fn get_event(
     Path(id): Path<String>,
     Query(params): Query<GetEventParams>,
 ) -> Result<Json<EventDetailResponse>, ApiError> {
-    let epoch = resolve_epoch(params.epoch.as_deref(), &state.epoch_mapper)?;
+    let mapper = state.epoch_mapper.read().await;
+    let epoch = resolve_epoch(params.epoch.as_deref(), &mapper)?;
     let reader = JsonlReader::<Event>::for_entity(&state.storage, EntityType::Event, &epoch);
     let events = reader
         .read_all()
@@ -1016,7 +1188,12 @@ pub async fn get_event(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let lists = dedup_by_id(lists, |l| l.id.as_str());
 
-    match_lists_to_placements(&mut event_placements, lists, &event.source_url);
+    let unmatched_lists = match_lists_to_placements(
+        &mut event_placements,
+        lists,
+        &event.source_url,
+        event.id.as_str(),
+    );
 
     Ok(Json(EventDetailResponse {
         id: event.id.as_str().to_string(),
@@ -1027,6 +1204,7 @@ pub async fn get_event(
         round_count: event.round_count,
         source_url: event.source_url,
         placements: event_placements,
+        unmatched_lists,
     }))
 }
 
@@ -1058,7 +1236,14 @@ mod tests {
         std::fs::create_dir_all(&epoch_dir).unwrap();
         AppState {
             storage: Arc::new(storage),
-            epoch_mapper: Arc::new(EpochMapper::new()),
+            epoch_mapper: Arc::new(tokio::sync::RwLock::new(EpochMapper::new())),
+            refresh_state: Arc::new(tokio::sync::RwLock::new(
+                crate::api::routes::refresh::RefreshState::default(),
+            )),
+            ai_backend: Arc::new(crate::agents::backend::MockBackend::new("{}")),
+            traffic_stats: std::sync::Arc::new(tokio::sync::RwLock::new(
+                crate::api::routes::traffic::TrafficStats::new(),
+            )),
         }
     }
 
@@ -1106,17 +1291,20 @@ mod tests {
         let e1 = make_event("GT Alpha", "2025-01-15", "https://example.com/a");
         let e2 = make_event("GT Beta", "2025-01-22", "https://example.com/b");
 
-        // Only e1 has army lists (matching source_url)
+        // e1 has a placement whose player name matches the list
+        let p1 = make_placement(&e1, 1, "Alice", "Aeldari");
+
         let list = ArmyList::new(
             "Aeldari".to_string(),
             2000,
             vec![Unit::new("Wraithguard".to_string(), 5)],
             "raw".to_string(),
         )
-        .with_source_url("https://example.com/a".to_string());
+        .with_source_url("https://example.com/a".to_string())
+        .with_player_name("Alice".to_string());
 
         write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2]);
-        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1]);
         write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list]);
 
         let app = build_router(state);
@@ -1290,6 +1478,58 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_detachment_from_raw_header_with_parenthetical() {
+        let raw = "+++++\n+ FACTION KEYWORD: Imperium – Astra Militarum\n+ DETACHMENT: Grizzled Company (Ruthless Discipline)\n+ TOTAL ARMY POINTS: 1990pts";
+        assert_eq!(
+            parse_detachment_from_raw(raw),
+            Some("Grizzled Company".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_detachment_freestanding_before_strike_force() {
+        // Format: Faction\nDetachment\nStrike Force (points)
+        let raw = "My Cool Army (1990 Points)\n\nNecrons\n\nAwakened Dynasty\n\nStrike Force (2,000 Points)\n\nCHARACTERS\n\nC'tan Shard";
+        assert_eq!(
+            parse_detachment_from_raw(raw),
+            Some("Awakened Dynasty".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_detachment_freestanding_after_strike_force() {
+        // Format: Faction\nStrike Force (points)\nDetachment
+        let raw = "My Army (2000 points)\n\nAstra Militarum\n\nStrike Force (2000 points)\n\nGrizzled Company\n\nCHARACTERS";
+        assert_eq!(
+            parse_detachment_from_raw(raw),
+            Some("Grizzled Company".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_detachment_with_subfaction_line() {
+        // Format: Faction\nSubfaction\nStrike Force (points)\nDetachment
+        let raw = "Don't worry about me (2000 points)\n\nSpace Marines\n\nUltramarines\n\nStrike Force (2000 points)\n\nBlade of Ultramar\n\nCHARACTERS";
+        assert_eq!(
+            parse_detachment_from_raw(raw),
+            Some("Blade of Ultramar".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_detachment_never_returns_strike_force() {
+        // Must NEVER return "Strike Force" as a detachment
+        let raw = "Army Name (2000 points)\n\nNecrons\n\nStrike Force (2000 points)\n\nCHARACTERS";
+        let det = parse_detachment_from_raw(raw);
+        assert!(
+            det.as_ref()
+                .is_none_or(|d| !d.to_lowercase().starts_with("strike force")),
+            "parse_detachment_from_raw must never return Strike Force, got: {:?}",
+            det
+        );
+    }
+
+    #[test]
     fn test_parse_detachment_from_raw_none() {
         let raw = "++ Army Roster ++\nNo detachment line";
         assert_eq!(parse_detachment_from_raw(raw), None);
@@ -1426,5 +1666,343 @@ mod tests {
         assert!(player_names_match("john smith", "John Smith"));
         assert!(player_names_match("John  Smith", "John Smith"));
         assert!(!player_names_match("John Smith", "Jane Smith"));
+    }
+
+    #[tokio::test]
+    async fn test_no_cross_event_list_contamination() {
+        // Two events share the same source_url (like a Goonhammer article)
+        // Each has a list for their winner but NOT for the other's players.
+        // The fix ensures lists only match by player name, not faction fallback.
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let shared_url = "https://example.com/article";
+        let e1 = make_event("GT Alpha", "2025-01-15", shared_url);
+        let e2 = make_event("GT Beta", "2025-01-22", shared_url);
+
+        // GT Alpha: Alice wins with Dark Angels
+        let p1 = make_placement(&e1, 1, "Alice", "Dark Angels");
+        // GT Alpha: Bob plays Dark Angels too — but has no list
+        let p2 = make_placement(&e1, 2, "Bob", "Dark Angels");
+
+        // GT Beta: Charlie wins with Dark Angels
+        let p3 = make_placement(&e2, 1, "Charlie", "Dark Angels");
+
+        // Lists: Alice and Charlie each have a list at the shared URL
+        let list_alice = ArmyList::new(
+            "Dark Angels".to_string(),
+            2000,
+            vec![Unit::new("Deathwing Knights".to_string(), 5)],
+            "raw".to_string(),
+        )
+        .with_source_url(shared_url.to_string())
+        .with_player_name("Alice".to_string());
+
+        let list_charlie = ArmyList::new(
+            "Dark Angels".to_string(),
+            2000,
+            vec![Unit::new("Ravenwing Knights".to_string(), 3)],
+            "raw".to_string(),
+        )
+        .with_source_url(shared_url.to_string())
+        .with_player_name("Charlie".to_string());
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2, &p3]);
+        write_jsonl(
+            &epoch_dir.join("army_lists.jsonl"),
+            &[&list_alice, &list_charlie],
+        );
+
+        let app = build_router(state);
+
+        // Check GT Alpha: Alice should have her list, Bob should NOT get Charlie's
+        let (status, json) = get_json(
+            app,
+            &format!("/api/events/{}?epoch=current", e1.id.as_str()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let placements = json["placements"].as_array().unwrap();
+        assert_eq!(placements.len(), 2);
+
+        // Alice (rank 1) should have her list
+        assert!(
+            placements[0]["army_list"].is_object(),
+            "Alice should have her own list"
+        );
+        // Bob (rank 2) should NOT have Charlie's list via faction fallback
+        assert!(
+            placements[1]["army_list"].is_null(),
+            "Bob must NOT get Charlie's list via faction fallback"
+        );
+
+        // Charlie's list should NOT appear on GT Alpha — it belongs to GT Beta
+        // and will show up on faction pages instead.
+        let unmatched = json["unmatched_lists"].as_array().unwrap();
+        assert_eq!(
+            unmatched.len(),
+            0,
+            "No unmatched lists — Charlie's list belongs to GT Beta"
+        );
+    }
+
+    // ── Detachment Consistency Integration Tests ─────────────────
+
+    /// Helper: cross-check placement detachments against army list raw_text.
+    /// Returns a list of mismatch descriptions. Empty = all consistent.
+    fn check_detachment_consistency(
+        placements: &[crate::models::Placement],
+        lists: &[ArmyList],
+    ) -> Vec<String> {
+        let name_to_list: std::collections::HashMap<String, &ArmyList> = lists
+            .iter()
+            .filter_map(|l| {
+                l.player_name.as_ref().map(|n| {
+                    (
+                        n.split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            .to_lowercase(),
+                        l,
+                    )
+                })
+            })
+            .collect();
+
+        let mut issues: Vec<String> = Vec::new();
+
+        for p in placements {
+            let norm_name = p
+                .player_name
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            let list = match name_to_list.get(&norm_name) {
+                Some(l) => l,
+                None => continue,
+            };
+
+            // Check: list structured detachment should not be a game size
+            if let Some(ref det) = list.detachment {
+                let lower = det.to_lowercase();
+                if lower.starts_with("strike force")
+                    || lower.starts_with("incursion")
+                    || lower.starts_with("combat patrol")
+                {
+                    issues.push(format!(
+                        "{}: list.detachment is game size '{}'",
+                        p.player_name, det
+                    ));
+                }
+            }
+
+            // Check: placement detachment matches what raw_text says
+            let placement_det = match &p.detachment {
+                Some(d) if !d.is_empty() => d,
+                _ => continue,
+            };
+            let raw_det = match parse_detachment_from_raw(&list.raw_text) {
+                Some(d) => d,
+                None => continue,
+            };
+
+            if !placement_det.eq_ignore_ascii_case(&raw_det) {
+                issues.push(format!(
+                    "{}: placement='{}' vs list_raw='{}'",
+                    p.player_name, placement_det, raw_det
+                ));
+            }
+        }
+
+        issues
+    }
+
+    /// Consistent data should produce zero issues.
+    #[tokio::test]
+    async fn test_detachment_consistency_passes_when_correct() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let event = make_event("GT Test", "2025-01-15", "https://example.com/a");
+
+        // Placement detachment matches the raw_text detachment
+        let mut p1 = make_placement(&event, 1, "Justin Moore", "Ultramarines");
+        p1.detachment = Some("Blade of Ultramar".to_string());
+
+        let list = ArmyList::new(
+            "Space Marines".to_string(),
+            2000,
+            vec![Unit::new("Captain Sicarius".to_string(), 1)],
+            "Army (2000 points)\n\nSpace Marines\n\nUltramarines\n\nStrike Force (2000 points)\n\nBlade of Ultramar\n\nCHARACTERS".to_string(),
+        )
+        .with_source_url("https://example.com/a".to_string())
+        .with_player_name("Justin Moore".to_string());
+
+        let mut p2 = make_placement(&event, 2, "Sean Murray", "Necrons");
+        p2.detachment = Some("Awakened Dynasty".to_string());
+
+        let list2 = ArmyList::new(
+            "Necrons".to_string(),
+            1990,
+            vec![Unit::new("C'tan Shard".to_string(), 1)],
+            "Army (1990 Points)\n\nNecrons\n\nAwakened Dynasty\n\nStrike Force (2,000 Points)\n\nCHARACTERS".to_string(),
+        )
+        .with_source_url("https://example.com/a".to_string())
+        .with_player_name("Sean Murray".to_string());
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&event]);
+        write_jsonl(&epoch_dir.join("placements.jsonl"), &[&p1, &p2]);
+        write_jsonl(&epoch_dir.join("army_lists.jsonl"), &[&list, &list2]);
+
+        let lists_loaded: Vec<ArmyList> = crate::storage::JsonlReader::for_entity(
+            &state.storage,
+            crate::storage::EntityType::ArmyList,
+            "current",
+        )
+        .read_all()
+        .unwrap();
+        let placements_loaded: Vec<crate::models::Placement> =
+            crate::storage::JsonlReader::for_entity(
+                &state.storage,
+                crate::storage::EntityType::Placement,
+                "current",
+            )
+            .read_all()
+            .unwrap();
+
+        let issues = check_detachment_consistency(&placements_loaded, &lists_loaded);
+        assert!(
+            issues.is_empty(),
+            "Expected no issues but found:\n{}",
+            issues.join("\n")
+        );
+    }
+
+    /// Detects when placement detachment doesn't match list raw_text.
+    #[test]
+    fn test_detachment_consistency_catches_mismatch() {
+        let event = make_event("GT Test", "2025-01-15", "https://example.com/a");
+
+        let mut p1 = make_placement(&event, 1, "Justin Moore", "Ultramarines");
+        p1.detachment = Some("Gladius Task Force".to_string());
+
+        let list = ArmyList::new(
+            "Space Marines".to_string(),
+            2000,
+            vec![Unit::new("Captain Sicarius".to_string(), 1)],
+            "Army (2000 points)\n\nSpace Marines\n\nUltramarines\n\nStrike Force (2000 points)\n\nBlade of Ultramar\n\nCHARACTERS".to_string(),
+        )
+        .with_source_url("https://example.com/a".to_string())
+        .with_player_name("Justin Moore".to_string());
+
+        let issues = check_detachment_consistency(&[p1], &[list]);
+        assert_eq!(issues.len(), 1, "Should detect exactly one mismatch");
+        assert!(
+            issues[0].contains("Gladius Task Force") && issues[0].contains("Blade of Ultramar"),
+            "Mismatch should name both detachments: {}",
+            issues[0]
+        );
+    }
+
+    /// Detects when a list's structured detachment field is a game size.
+    #[test]
+    fn test_detachment_consistency_catches_game_size() {
+        let event = make_event("GT Test", "2025-01-15", "https://example.com/a");
+
+        let mut p1 = make_placement(&event, 1, "Sean Murray", "Necrons");
+        p1.detachment = Some("Awakened Dynasty".to_string());
+
+        let mut list = ArmyList::new(
+            "Necrons".to_string(),
+            1990,
+            vec![Unit::new("C'tan Shard".to_string(), 1)],
+            "Army\n\nNecrons\n\nAwakened Dynasty\n\nStrike Force (2,000 Points)\n\nCHARACTERS"
+                .to_string(),
+        );
+        list.detachment = Some("Strike Force".to_string());
+        let list = list
+            .with_source_url("https://example.com/a".to_string())
+            .with_player_name("Sean Murray".to_string());
+
+        let issues = check_detachment_consistency(&[p1], &[list]);
+        assert!(
+            issues.iter().any(|i| i.contains("game size")),
+            "Should detect Strike Force as game size, got: {:?}",
+            issues
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_events_min_players_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 =
+            make_event("Small GT", "2025-01-15", "https://example.com/a").with_player_count(10);
+        let e2 = make_event("Big GT", "2025-01-22", "https://example.com/b").with_player_count(50);
+        let e3 = make_event("No Count GT", "2025-01-20", "https://example.com/c");
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2, &e3]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+        write_jsonl::<ArmyList>(&epoch_dir.join("army_lists.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/events?min_players=20").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["name"], "Big GT");
+    }
+
+    #[tokio::test]
+    async fn test_list_events_max_players_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 =
+            make_event("Small GT", "2025-01-15", "https://example.com/a").with_player_count(10);
+        let e2 = make_event("Big GT", "2025-01-22", "https://example.com/b").with_player_count(50);
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+        write_jsonl::<ArmyList>(&epoch_dir.join("army_lists.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/events?max_players=30").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["name"], "Small GT");
+    }
+
+    #[tokio::test]
+    async fn test_list_events_min_max_players_range() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = setup_test_state(tmp.path());
+        let epoch_dir = tmp.path().join("normalized").join("current");
+
+        let e1 = make_event("Tiny", "2025-01-10", "https://example.com/a").with_player_count(5);
+        let e2 = make_event("Medium", "2025-01-15", "https://example.com/b").with_player_count(30);
+        let e3 = make_event("Large", "2025-01-20", "https://example.com/c").with_player_count(100);
+
+        write_jsonl(&epoch_dir.join("events.jsonl"), &[&e1, &e2, &e3]);
+        write_jsonl::<Placement>(&epoch_dir.join("placements.jsonl"), &[]);
+        write_jsonl::<ArmyList>(&epoch_dir.join("army_lists.jsonl"), &[]);
+
+        let app = build_router(state);
+        let (status, json) = get_json(app, "/api/events?min_players=10&max_players=50").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["name"], "Medium");
     }
 }

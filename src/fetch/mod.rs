@@ -3,11 +3,12 @@
 //! Fetches raw content (HTML, PDFs) from URLs and caches them locally.
 //! All fetched content is stored in the raw data directory for re-processing.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -102,6 +103,9 @@ pub struct FetcherConfig {
 
     /// Delay between requests to same host (rate limiting)
     pub request_delay: Duration,
+
+    /// Extra headers to include in every request (e.g., API keys)
+    pub extra_headers: HashMap<String, String>,
 }
 
 impl Default for FetcherConfig {
@@ -113,6 +117,7 @@ impl Default for FetcherConfig {
             timeout: Duration::from_secs(30),
             user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string(),
             request_delay: Duration::from_millis(500),
+            extra_headers: HashMap::new(),
         }
     }
 }
@@ -132,6 +137,15 @@ impl Fetcher {
             HeaderValue::from_str(&config.user_agent)
                 .unwrap_or_else(|_| HeaderValue::from_static("meta-agent/0.1.0")),
         );
+
+        for (key, value) in &config.extra_headers {
+            if let (Ok(name), Ok(val)) = (
+                HeaderName::from_bytes(key.as_bytes()),
+                HeaderValue::from_str(value),
+            ) {
+                headers.insert(name, val);
+            }
+        }
 
         let client = Client::builder()
             .timeout(config.timeout)
@@ -241,6 +255,14 @@ impl Fetcher {
         }
 
         if !status.is_success() {
+            let body_preview = response
+                .text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(500)
+                .collect::<String>();
+            tracing::warn!("HTTP {} from {}: {}", status.as_u16(), url, body_preview);
             return Err(FetchError::HttpStatus {
                 status: status.as_u16(),
                 message: status.canonical_reason().unwrap_or("Unknown").to_string(),
@@ -383,6 +405,7 @@ mod tests {
             timeout: Duration::from_secs(10),
             user_agent: "test-agent".to_string(),
             request_delay: Duration::from_millis(0),
+            extra_headers: HashMap::new(),
         }
     }
 
@@ -546,6 +569,7 @@ mod tests {
             timeout: Duration::from_secs(10),
             user_agent: "test-agent".to_string(),
             request_delay: Duration::from_millis(0),
+            extra_headers: HashMap::new(),
         };
         let fetcher = Fetcher::new(config).unwrap();
 

@@ -1621,6 +1621,7 @@ dependencies = [
  "hex",
  "parquet",
  "pretty_assertions",
+ "regex",
  "reqwest",
  "scraper",
  "serde",

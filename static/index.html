@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>40k Meta Tracker</title>
-    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/style.css?v=2">
     <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
@@ -19,12 +19,15 @@
 // ── API Client ──────────────────────────────────────────────────
 
 const Api = {
-    async getEvents(page, pageSize, epoch, from, to, hasResults) {
+    async getEvents(page, pageSize, epoch, from, to, hasResults, q, minPlayers, maxPlayers) {
         var params = 'page=' + (page||1) + '&page_size=' + (pageSize||20);
         if (epoch && epoch !== 'current') params += '&epoch=' + encodeURIComponent(epoch);
         if (from) params += '&from=' + from;
         if (to) params += '&to=' + to;
         if (hasResults) params += '&has_results=true';
+        if (q) params += '&q=' + encodeURIComponent(q);
+        if (minPlayers != null && minPlayers !== '') params += '&min_players=' + minPlayers;
+        if (maxPlayers != null && maxPlayers !== '') params += '&max_players=' + maxPlayers;
         const res = await fetch('/api/events?' + params);
         if (!res.ok) throw new Error('Events API error: ' + res.status);
         return res.json();
@@ -105,8 +108,120 @@ const Api = {
         const res = await fetch('/api/analytics/players' + params);
         if (!res.ok) throw new Error('Analytics players API error: ' + res.status);
         return res.json();
+    },
+    async getRefreshPreview(dateFrom, dateTo) {
+        var params = [];
+        if (dateFrom) params.push('date_from=' + dateFrom);
+        if (dateTo) params.push('date_to=' + dateTo);
+        var qs = params.length ? '?' + params.join('&') : '';
+        var res = await fetch('/api/refresh/preview' + qs);
+        if (!res.ok) throw new Error('Refresh preview error: ' + res.status);
+        return res.json();
+    },
+    async startRefresh(dateFrom, dateTo) {
+        var res = await fetch('/api/refresh', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({date_from: dateFrom, date_to: dateTo})
+        });
+        if (!res.ok) throw new Error('Start refresh error: ' + res.status);
+        return res.json();
+    },
+    async getRefreshStatus() {
+        var res = await fetch('/api/refresh/status');
+        if (!res.ok) throw new Error('Refresh status error: ' + res.status);
+        return res.json();
+    },
+    async getTraffic() {
+        var res = await fetch('/api/traffic');
+        if (!res.ok) throw new Error('Traffic API error: ' + res.status);
+        return res.json();
+    },
+    async getTrafficGeo(ips) {
+        var res = await fetch('/api/traffic/geo?ips=' + encodeURIComponent(ips.join(',')));
+        if (!res.ok) throw new Error('Traffic geo error: ' + res.status);
+        return res.json();
+    },
+    async getDetachmentStats(epoch, faction, minCount) {
+        var parts = [];
+        if (epoch) parts.push('epoch=' + encodeURIComponent(epoch));
+        if (faction) parts.push('faction=' + encodeURIComponent(faction));
+        if (minCount) parts.push('min_count=' + minCount);
+        var params = parts.length > 0 ? '?' + parts.join('&') : '';
+        var res = await fetch('/api/analytics/detachments' + params);
+        if (!res.ok) throw new Error('Detachment stats API error: ' + res.status);
+        return res.json();
+    },
+    async getUnitPerformance(epoch, faction, minAppearances) {
+        var parts = [];
+        if (epoch) parts.push('epoch=' + encodeURIComponent(epoch));
+        if (faction) parts.push('faction=' + encodeURIComponent(faction));
+        if (minAppearances) parts.push('min_appearances=' + minAppearances);
+        var params = parts.length > 0 ? '?' + parts.join('&') : '';
+        var res = await fetch('/api/analytics/unit-performance' + params);
+        if (!res.ok) throw new Error('Unit performance API error: ' + res.status);
+        return res.json();
+    },
+    async getPointsEfficiency(epoch, faction) {
+        var parts = [];
+        if (epoch) parts.push('epoch=' + encodeURIComponent(epoch));
+        if (faction) parts.push('faction=' + encodeURIComponent(faction));
+        var params = parts.length > 0 ? '?' + parts.join('&') : '';
+        var res = await fetch('/api/analytics/points-efficiency' + params);
+        if (!res.ok) throw new Error('Points efficiency API error: ' + res.status);
+        return res.json();
+    },
+    async getMatchups(epoch) {
+        var params = epoch ? '?epoch=' + encodeURIComponent(epoch) : '';
+        var res = await fetch('/api/analytics/matchups' + params);
+        if (!res.ok) throw new Error('Matchups API error: ' + res.status);
+        return res.json();
+    },
+    async getArchetypes(epoch, faction) {
+        var parts = [];
+        if (epoch) parts.push('epoch=' + encodeURIComponent(epoch));
+        if (faction) parts.push('faction=' + encodeURIComponent(faction));
+        var params = parts.length > 0 ? '?' + parts.join('&') : '';
+        var res = await fetch('/api/analytics/archetypes' + params);
+        if (!res.ok) throw new Error('Archetypes API error: ' + res.status);
+        return res.json();
+    },
+    async getCompositeScores(epoch, from, to) {
+        var parts = [];
+        if (epoch) parts.push('epoch=' + encodeURIComponent(epoch));
+        if (from) parts.push('from=' + from);
+        if (to) parts.push('to=' + to);
+        var params = parts.length > 0 ? '?' + parts.join('&') : '';
+        var res = await fetch('/api/analytics/composite-scores' + params);
+        if (!res.ok) throw new Error('Composite scores API error: ' + res.status);
+        return res.json();
+    },
+    async getWinRates(epoch, from, to, minGames, minPlayers) {
+        var parts = [];
+        if (epoch) parts.push('epoch=' + encodeURIComponent(epoch));
+        if (from) parts.push('from=' + from);
+        if (to) parts.push('to=' + to);
+        if (minGames) parts.push('min_games=' + minGames);
+        if (minPlayers) parts.push('min_players=' + minPlayers);
+        var params = parts.length > 0 ? '?' + parts.join('&') : '';
+        var res = await fetch('/api/analytics/win-rates' + params);
+        if (!res.ok) throw new Error('Win rates API error: ' + res.status);
+        return res.json();
     }
 };
+
+// ── Theme-aware chart colors ────────────────────────────────────
+
+function chartColors() {
+    var s = getComputedStyle(document.documentElement);
+    return {
+        bg: s.getPropertyValue('--bg-card').trim(),
+        gold: s.getPropertyValue('--gold').trim(),
+        text: s.getPropertyValue('--text').trim(),
+        muted: s.getPropertyValue('--text-muted').trim(),
+        border: s.getPropertyValue('--border').trim(),
+    };
+}
 
 // ── Faction Chart ───────────────────────────────────────────────
 
@@ -136,6 +251,7 @@ function MetaChart(props) {
             chartInstance.current.destroy();
         }
 
+        var cc = chartColors();
         var ctx = chartRef.current.getContext('2d');
         chartInstance.current = new Chart(ctx, {
             type: 'bar',
@@ -167,10 +283,10 @@ function MetaChart(props) {
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        backgroundColor: '#1c1d2b',
-                        titleColor: '#c9a84c',
-                        bodyColor: '#c8cad0',
-                        borderColor: '#2e3048',
+                        backgroundColor: cc.bg,
+                        titleColor: cc.gold,
+                        bodyColor: cc.text,
+                        borderColor: cc.border,
                         borderWidth: 1,
                         callbacks: {
                             afterLabel: function(context) {
@@ -183,13 +299,13 @@ function MetaChart(props) {
                 },
                 scales: {
                     x: {
-                        grid: { color: '#2e3048' },
-                        ticks: { color: '#7a7d8a', font: { size: 11 } },
-                        title: { display: true, text: label, color: '#7a7d8a', font: { size: 11 } }
+                        grid: { color: cc.border },
+                        ticks: { color: cc.muted, font: { size: 11 } },
+                        title: { display: true, text: label, color: cc.muted, font: { size: 11 } }
                     },
                     y: {
                         grid: { display: false },
-                        ticks: { color: '#c8cad0', font: { size: 12 } }
+                        ticks: { color: cc.text, font: { size: 12 } }
                     }
                 }
             }
@@ -230,23 +346,392 @@ function TierLegend(props) {
     );
 }
 
+function winRateTierColor(rate) {
+    if (rate >= 55) return '#e05555';      // S
+    if (rate >= 52) return '#e0884a';      // A
+    if (rate >= 48) return '#c9a84c';      // B
+    if (rate >= 45) return '#6a8da6';      // C
+    return '#5a5c78';                       // D
+}
+
+function WinRateChart(props) {
+    var data = props.data;
+    var onSelectFaction = props.onSelectFaction;
+    var chartRef = React.useRef(null);
+    var chartInstance = React.useRef(null);
+    var topRef = React.useRef([]);
+
+    React.useEffect(function() {
+        if (!chartRef.current || !data || !data.factions || data.factions.length === 0) return;
+
+        var sorted = data.factions.slice().sort(function(a, b) { return b.adjusted_win_rate - a.adjusted_win_rate; });
+        var top = sorted.slice(0, 15);
+        topRef.current = top;
+
+        if (chartInstance.current) {
+            chartInstance.current.destroy();
+        }
+
+        var cc = chartColors();
+        var ctx = chartRef.current.getContext('2d');
+
+        // Plugin to draw the 45-55% balanced band and 50% center line
+        var balanceBandPlugin = {
+            id: 'balanceBand',
+            beforeDraw: function(chart) {
+                var xScale = chart.scales.x;
+                var yScale = chart.scales.y;
+                var chartCtx = chart.ctx;
+                var x45 = xScale.getPixelForValue(45);
+                var x55 = xScale.getPixelForValue(55);
+                var x50 = xScale.getPixelForValue(50);
+                var top = yScale.top;
+                var bottom = yScale.bottom;
+                // Draw green balanced band
+                chartCtx.save();
+                chartCtx.fillStyle = 'rgba(76, 175, 80, 0.08)';
+                chartCtx.fillRect(x45, top, x55 - x45, bottom - top);
+                // Draw 50% dashed line
+                chartCtx.strokeStyle = 'rgba(76, 175, 80, 0.4)';
+                chartCtx.lineWidth = 1.5;
+                chartCtx.setLineDash([6, 4]);
+                chartCtx.beginPath();
+                chartCtx.moveTo(x50, top);
+                chartCtx.lineTo(x50, bottom);
+                chartCtx.stroke();
+                chartCtx.restore();
+            }
+        };
+        var barLabelPlugin = {
+            id: 'barLabels',
+            afterDatasetsDraw: function(chart) {
+                var chartCtx = chart.ctx;
+                var meta = chart.getDatasetMeta(0);
+                chartCtx.save();
+                chartCtx.font = 'bold 11px sans-serif';
+                chartCtx.fillStyle = cc.text;
+                chartCtx.textBaseline = 'middle';
+                meta.data.forEach(function(bar, i) {
+                    var val = chart.data.datasets[0].data[i];
+                    chartCtx.fillText(val.toFixed(1) + '%', bar.x + 4, bar.y);
+                });
+                chartCtx.restore();
+            }
+        };
+
+        chartInstance.current = new Chart(ctx, {
+            type: 'bar',
+            plugins: [balanceBandPlugin, barLabelPlugin],
+            data: {
+                labels: top.map(function(f) { return f.faction; }),
+                datasets: [{
+                    label: 'Adjusted Win Rate %',
+                    data: top.map(function(f) { return f.adjusted_win_rate; }),
+                    backgroundColor: top.map(function(f) {
+                        return winRateTierColor(f.adjusted_win_rate);
+                    }),
+                    borderColor: 'transparent',
+                    borderRadius: 4,
+                    barThickness: 18,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                onClick: function(evt, elements) {
+                    if (elements.length > 0 && onSelectFaction) {
+                        var idx = elements[0].index;
+                        onSelectFaction(topRef.current[idx].faction);
+                    }
+                },
+                onHover: function(evt, elements) {
+                    evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+                },
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: cc.bg,
+                        titleColor: cc.gold,
+                        bodyColor: cc.text,
+                        borderColor: cc.border,
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                var f = topRef.current[context.dataIndex];
+                                return 'Adjusted: ' + f.adjusted_win_rate.toFixed(1) + '%  (Raw: ' + f.win_rate.toFixed(1) + '%)';
+                            },
+                            afterLabel: function(context) {
+                                var f = topRef.current[context.dataIndex];
+                                return 'Games: ' + f.games_played + '  (W' + f.wins + ' / L' + f.losses + ' / D' + f.draws + ')\nPlayers: ' + f.player_count;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        min: 30,
+                        max: 75,
+                        grid: { color: cc.border },
+                        ticks: {
+                            color: cc.muted,
+                            font: { size: 11 },
+                            callback: function(v) { return v + '%'; }
+                        },
+                        title: { display: true, text: 'Game Win Rate %', color: cc.muted, font: { size: 11 } }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { color: cc.text, font: { size: 12 } }
+                    }
+                }
+            }
+        });
+
+        return function() {
+            if (chartInstance.current) chartInstance.current.destroy();
+        };
+    }, [data]);
+
+    var count = data && data.factions ? Math.min(data.factions.length, 15) : 10;
+    var height = Math.max(280, count * 28 + 40);
+
+    return (
+        <div>
+            <div className="chart-container" style={{ height: height + 'px' }}>
+                <canvas ref={chartRef}></canvas>
+            </div>
+            <div className="tier-legend">
+                <div className="tier-legend-row">
+                    <span className="tier-legend-item"><span className="tier-dot" style={{background:'#e05555'}}></span>S {'(\u226555%)'}</span>
+                    <span className="tier-legend-item"><span className="tier-dot" style={{background:'#e0884a'}}></span>A {'(\u226552%)'}</span>
+                    <span className="tier-legend-item"><span className="tier-dot" style={{background:'#c9a84c'}}></span>B {'(\u226548%)'}</span>
+                    <span className="tier-legend-item"><span className="tier-dot" style={{background:'#6a8da6'}}></span>C {'(\u226545%)'}</span>
+                    <span className="tier-legend-item"><span className="tier-dot" style={{background:'#5a5c78'}}></span>D {'(<45%)'}</span>
+                    <span className="tier-info-wrap">
+                        <span className="tier-info-btn">?</span>
+                        <span className="tier-tooltip">Adjusted game-level win rate, using regression to the mean. Small samples are pulled toward 50% so factions with few games don't dominate. Green band = balanced range (45-55%). Hover for raw win rate and game count.</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function CompositeChart(props) {
+    var data = props.data;
+    var metric = props.metric;
+    var label = props.label;
+    var description = props.description;
+    var onSelectFaction = props.onSelectFaction;
+    var chartRef = React.useRef(null);
+    var chartInstance = React.useRef(null);
+    var topRef = React.useRef([]);
+
+    React.useEffect(function() {
+        if (!chartRef.current || !data || !data.factions || data.factions.length === 0) return;
+
+        var sorted = data.factions.slice().sort(function(a, b) { return b[metric] - a[metric]; });
+        var top = sorted.slice(0, 15);
+        topRef.current = top;
+
+        if (chartInstance.current) {
+            chartInstance.current.destroy();
+        }
+
+        var cc = chartColors();
+        var ctx = chartRef.current.getContext('2d');
+        var isBalanceDev = metric === 'balance_deviation';
+
+        // For balance deviation, use diverging colors
+        var bgColors;
+        if (isBalanceDev) {
+            bgColors = top.map(function(f) {
+                var v = f[metric];
+                if (v > 3) return '#e05555';
+                if (v > 0) return '#e0884a';
+                if (v > -3) return '#6a8da6';
+                return '#4a7ab5';
+            });
+        } else {
+            // Tier-based coloring
+            var tierItems = top.map(function(f, i) { return { idx: i, val: f[metric], count: f.placement_count || 3 }; });
+            var qualifying = tierItems.filter(function(it) { return it.count >= 3; });
+            qualifying.sort(function(a, b) { return b.val - a.val; });
+            var n = qualifying.length;
+            var tiers = {};
+            for (var r = 0; r < n; r++) {
+                var pct = n > 1 ? r / (n - 1) : 0;
+                var tier;
+                if (pct <= 0.15) tier = 0;
+                else if (pct <= 0.40) tier = 1;
+                else if (pct <= 0.70) tier = 2;
+                else if (pct <= 0.90) tier = 3;
+                else tier = 4;
+                tiers[qualifying[r].idx] = tier;
+            }
+            for (var j = 0; j < tierItems.length; j++) {
+                if (tiers[j] === undefined) tiers[j] = 4;
+            }
+            bgColors = top.map(function(f, i) { return tierColor(tiers[i]); });
+        }
+
+        var barLabelPlugin = {
+            id: 'compositeBarLabels',
+            afterDatasetsDraw: function(chart) {
+                var chartCtx = chart.ctx;
+                var meta = chart.getDatasetMeta(0);
+                chartCtx.save();
+                chartCtx.font = 'bold 11px sans-serif';
+                chartCtx.fillStyle = cc.text;
+                chartCtx.textBaseline = 'middle';
+                meta.data.forEach(function(bar, i) {
+                    var val = chart.data.datasets[0].data[i];
+                    var txt = isBalanceDev ? (val >= 0 ? '+' : '') + val.toFixed(1) : val.toFixed(1);
+                    var x = isBalanceDev ? Math.max(bar.x, bar.base) + 4 : bar.x + 4;
+                    chartCtx.fillText(txt, x, bar.y);
+                });
+                chartCtx.restore();
+            }
+        };
+
+        var plugins = [barLabelPlugin];
+        if (isBalanceDev) {
+            plugins.push({
+                id: 'zeroLine',
+                beforeDraw: function(chart) {
+                    var xScale = chart.scales.x;
+                    var yScale = chart.scales.y;
+                    var chartCtx = chart.ctx;
+                    var x0 = xScale.getPixelForValue(0);
+                    chartCtx.save();
+                    chartCtx.strokeStyle = 'rgba(200,200,200,0.5)';
+                    chartCtx.lineWidth = 1;
+                    chartCtx.setLineDash([4, 3]);
+                    chartCtx.beginPath();
+                    chartCtx.moveTo(x0, yScale.top);
+                    chartCtx.lineTo(x0, yScale.bottom);
+                    chartCtx.stroke();
+                    chartCtx.restore();
+                }
+            });
+        }
+
+        chartInstance.current = new Chart(ctx, {
+            type: 'bar',
+            plugins: plugins,
+            data: {
+                labels: top.map(function(f) { return f.faction; }),
+                datasets: [{
+                    label: label,
+                    data: top.map(function(f) { return f[metric]; }),
+                    backgroundColor: bgColors,
+                    borderColor: 'transparent',
+                    borderRadius: 4,
+                    barThickness: 18,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                onClick: function(evt, elements) {
+                    if (elements.length > 0 && onSelectFaction) {
+                        var idx = elements[0].index;
+                        onSelectFaction(topRef.current[idx].faction);
+                    }
+                },
+                onHover: function(evt, elements) {
+                    evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+                },
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: cc.bg,
+                        titleColor: cc.gold,
+                        bodyColor: cc.text,
+                        borderColor: cc.border,
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                var f = topRef.current[context.dataIndex];
+                                return label + ': ' + f[metric].toFixed(1);
+                            },
+                            afterLabel: function(context) {
+                                var f = topRef.current[context.dataIndex];
+                                return 'Adj WR: ' + f.adjusted_win_rate.toFixed(1) + '%\nMeta Share: ' + f.meta_share.toFixed(1) + '%\nTop 4 Rate: ' + f.top4_rate.toFixed(1) + '%\nGames: ' + f.games_played;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: cc.border },
+                        ticks: { color: cc.muted, font: { size: 11 } },
+                        title: { display: true, text: label, color: cc.muted, font: { size: 11 } }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { color: cc.text, font: { size: 12 } }
+                    }
+                }
+            }
+        });
+
+        return function() {
+            if (chartInstance.current) chartInstance.current.destroy();
+        };
+    }, [data, metric]);
+
+    var count = data && data.factions ? Math.min(data.factions.length, 15) : 10;
+    var height = Math.max(280, count * 28 + 40);
+
+    return (
+        <div>
+            <div className="chart-container" style={{ height: height + 'px' }}>
+                <canvas ref={chartRef}></canvas>
+            </div>
+            {description && (
+                <div className="tier-legend">
+                    <div className="tier-legend-row">
+                        <span className="tier-info-wrap">
+                            <span className="tier-info-btn">?</span>
+                            <span className="tier-tooltip">{description}</span>
+                        </span>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function SidebarCharts(props) {
     var factions = props.factions;
+    var winRateData = props.winRateData;
+    var compositeData = props.compositeData;
     var onSelectFaction = props.onSelectFaction;
-    var tabRef = React.useState('meta');
+    var tabRef = React.useState('winrate');
     var activeTab = tabRef[0]; var setActiveTab = tabRef[1];
 
     return (
         <div>
             <div className="chart-tabs">
-                <button className={'chart-tab' + (activeTab === 'meta' ? ' active' : '')} onClick={function() { setActiveTab('meta'); }}>Meta Share</button>
                 <button className={'chart-tab' + (activeTab === 'winrate' ? ' active' : '')} onClick={function() { setActiveTab('winrate'); }}>Win Rate</button>
+                <button className={'chart-tab' + (activeTab === 'meta' ? ' active' : '')} onClick={function() { setActiveTab('meta'); }}>Meta Share</button>
+                <button className={'chart-tab' + (activeTab === 'eventwin' ? ' active' : '')} onClick={function() { setActiveTab('eventwin'); }}>Event Wins</button>
+                <button className={'chart-tab' + (activeTab === 'threat' ? ' active' : '')} onClick={function() { setActiveTab('threat'); }}>Threat</button>
             </div>
-            {activeTab === 'meta' && (
-                <MetaChart factions={factions} metric="meta_share" label="Meta Share %" onSelectFaction={onSelectFaction} tooltipInfo="Colour shows tier based on meta share (% of all placements). Ranked by percentile: S = top 15%, A = next 25%, B = middle 30%, C = next 20%, D = bottom 10% or fewer than 3 appearances." />
-            )}
             {activeTab === 'winrate' && (
-                <MetaChart factions={factions} metric="win_rate" label="Win Rate %" onSelectFaction={onSelectFaction} tooltipInfo="Colour shows tier based on win rate (1st place finishes / total appearances). Ranked by percentile: S = top 15%, A = next 25%, B = middle 30%, C = next 20%, D = bottom 10% or fewer than 3 appearances." />
+                <WinRateChart data={winRateData} onSelectFaction={onSelectFaction} />
+            )}
+            {activeTab === 'meta' && (
+                <MetaChart factions={factions} metric="meta_share" label="Meta Share %" onSelectFaction={onSelectFaction} tooltipInfo="Colour shows tier based on meta share (% of tracked top finishers). Only top placements per event are tracked. Ranked by percentile: S = top 15%, A = next 25%, B = middle 30%, C = next 20%, D = bottom 10% or fewer than 3 appearances." />
+            )}
+            {activeTab === 'eventwin' && (
+                <MetaChart factions={factions} metric="first_place_count" label="Event Wins" onSelectFaction={onSelectFaction} tooltipInfo="Total 1st place finishes per faction across tracked events. Ranked by percentile: S = top 15%, A = next 25%, B = middle 30%, C = next 20%, D = bottom 10% or fewer than 3 appearances." />
+            )}
+            {activeTab === 'threat' && (
+                <CompositeChart data={compositeData} metric="meta_threat" label="Meta Threat" onSelectFaction={onSelectFaction} description="Meta Threat = Adjusted Win Rate x sqrt(Meta Share). Combines how well a faction wins with how popular it is. High threat = both strong and widely played. Tier-colored by percentile." />
             )}
         </div>
     );
@@ -325,9 +810,9 @@ function FactionCardRow(props) {
                     <span className={'fc-chevron' + (isExpanded ? ' open' : '')}>{'\u25b6'}</span>
                 </div>
                 <div className="fc-row-stats">
-                    <span className="fc-stat" title="Meta share \u2014 % of all tournament placements"><span className="fc-stat-icon">{'\u25ce'}</span>Meta {f.meta_share}%</span>
-                    <span className="fc-stat" title="Win rate \u2014 1st place finishes / total appearances"><span className="fc-stat-icon">{'\u2691'}</span>Win {f.win_rate}%</span>
-                    <span className="fc-stat-count" title="Total player appearances"><span className="fc-stat-icon">{'\u2302'}</span>{f.count} players</span>
+                    <span className="fc-stat" title="Meta share \u2014 % of tracked top finishers"><span className="fc-stat-icon">{'\u25ce'}</span>Meta {f.meta_share}%</span>
+                    <span className="fc-stat" title="1st place rate \u2014 event wins / tracked top finishers"><span className="fc-stat-icon">{'\u2691'}</span>1st {f.win_rate}%</span>
+                    <span className="fc-stat-count" title="Total tracked top finishers (not all event attendees)"><span className="fc-stat-icon">{'\u2302'}</span>{f.count} appearances</span>
                 </div>
             </div>
             <div className={'faction-card-body' + (isExpanded ? ' open' : '')}>
@@ -338,7 +823,7 @@ function FactionCardRow(props) {
                         <span className="fc-bar-val">{f.meta_share}%</span>
                     </div>
                     <div className="fc-bar-row">
-                        <span className="fc-bar-label">Wins</span>
+                        <span className="fc-bar-label">1st</span>
                         <div className="fc-bar-track"><div className="fc-bar-fill" style={{width: winPct + '%', background: tierColor(winTiers[idx])}}></div></div>
                         <span className="fc-bar-val">{f.win_rate}%</span>
                     </div>
@@ -484,13 +969,15 @@ var ROLE_ORDER = [
     { key: 'vehicle', label: 'Vehicles & Monsters', icon: '\u25C8', match: function(kw) { return kw === 'Vehicle' || kw === 'Monster' || kw === 'Walker'; } },
     { key: 'transport', label: 'Transports', icon: '\u25A0', match: function(kw) { return kw === 'Dedicated Transport' || kw === 'Transport'; } },
     { key: 'mounted', label: 'Mounted', icon: '\u2658', match: function(kw) { return kw === 'Mounted' || kw === 'Cavalry'; } },
-    { key: 'other', label: 'Other', icon: '\u2731', match: function() { return false; } },
+    { key: 'allied', label: 'Allied Units', icon: '\u2721', match: function(kw) { return kw === 'Allied'; } },
+    { key: 'fortification', label: 'Fortifications', icon: '\u25A3', match: function(kw) { return kw === 'Fortification'; } },
+    { key: 'other', label: 'Other', icon: '\u2731', match: function(kw) { return kw === 'Other'; } },
 ];
 
 function classifyUnit(unit) {
     var kws = (unit.keywords || []);
     // Characters first — even if also Infantry/Monster
-    for (var r = 0; r < ROLE_ORDER.length - 1; r++) {
+    for (var r = 0; r < ROLE_ORDER.length; r++) {
         for (var k = 0; k < kws.length; k++) {
             if (ROLE_ORDER[r].match(kws[k])) return ROLE_ORDER[r].key;
         }
@@ -750,12 +1237,35 @@ function EventList(props) {
     var pagination = props.pagination;
     var onPageChange = props.onPageChange;
     var onSelectEvent = props.onSelectEvent;
+    var onSearch = props.onSearch;
+    var searchQuery = props.searchQuery || '';
+
+    var searchRef = React.useRef(null);
+    var debounceRef = React.useRef(null);
+
+    function handleSearchInput(e) {
+        var value = e.target.value;
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(function() {
+            if (onSearch) onSearch(value);
+        }, 300);
+    }
 
     if (!events) return <div className="loading"><div className="spinner"></div>Loading events...</div>;
-    if (events.length === 0) return <div className="loading">No events found</div>;
 
     return (
         <div>
+            <input
+                ref={searchRef}
+                type="text"
+                className="event-search"
+                placeholder="Search tournaments..."
+                defaultValue={searchQuery}
+                onChange={handleSearchInput}
+            />
+            {events.length === 0 ? (
+                <div className="loading">No events found</div>
+            ) : (
             <div className="event-list">
                 {events.map(function(event) {
                     return (
@@ -792,6 +1302,7 @@ function EventList(props) {
                     );
                 })}
             </div>
+            )}
             {pagination && pagination.total_pages > 1 ? (
                 <div className="pagination">
                     <button disabled={!pagination.has_prev} onClick={function() { onPageChange(pagination.page - 1); }}>{'\u2190'} Prev</button>
@@ -852,6 +1363,8 @@ function EventDetail(props) {
                 </div>
             </div>
 
+            {event.placements && event.placements.length > 0 ? <EventAnalytics placements={event.placements} /> : null}
+
             {event.placements && event.placements.length > 0 ? (
                 <div>
                     <div className="section-title">Placements</div>
@@ -878,6 +1391,309 @@ function EventDetail(props) {
                     })}
                 </div>
             ) : null}
+
+            {event.unmatched_lists && event.unmatched_lists.length > 0 ? (
+                <div style={{marginTop: '1.5rem'}}>
+                    <div className="section-title">Other Lists from This Event's Source</div>
+                    <div style={{fontSize: '0.85rem', color: '#8a8a9a', marginBottom: '0.75rem'}}>
+                        These lists were published alongside this event but could not be matched to a specific player above.
+                    </div>
+                    {event.unmatched_lists.map(function(ul, i) {
+                        var key = 'ul-' + i;
+                        var label = (ul.player_name || 'Unknown') + ' \u2014 ' + (ul.faction || 'Unknown Faction');
+                        if (ul.detachment) label += ' (' + ul.detachment + ')';
+                        return (
+                            <div key={i} className="placement-row">
+                                <div className="placement-header clickable" onClick={function() { toggleList(key); }}>
+                                    <span className="rank-cell" style={{opacity: 0.4}}>{'\u2014'}</span>
+                                    <span className="placement-player">{ul.player_name || 'Unknown'}</span>
+                                    <span className="placement-faction"><FactionIcon name={ul.faction || ''} />{ul.faction || 'Unknown'}</span>
+                                    <span className="placement-det">{ul.detachment || '\u2014'}</span>
+                                    <span className="placement-record">{'\u2014'}</span>
+                                    <span className={'chevron ' + (expandedLists[key] ? 'open' : '')}>{'\u25b6'}</span>
+                                </div>
+                                {expandedLists[key] ? (
+                                    <ArmyListDisplay list={ul.list} />
+                                ) : null}
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+// ── Event Analytics Helpers ──────────────────────────────────────
+
+function getAllegianceColor(faction) {
+    var allegiance = FACTION_ALLEGIANCE_MAP[faction] || 'Unknown';
+    return FACTION_ICON_COLORS[allegiance] || FACTION_ICON_COLORS.Unknown;
+}
+
+function computeFactionStats(placements) {
+    var map = {};
+    placements.forEach(function(p) {
+        var f = p.faction || 'Unknown';
+        if (!map[f]) map[f] = { faction: f, count: 0, totalWinPct: 0, withRecord: 0, bestRank: 9999 };
+        map[f].count++;
+        if (p.rank < map[f].bestRank) map[f].bestRank = p.rank;
+        if (p.record && (p.record.wins + p.record.losses + p.record.draws) > 0) {
+            var total = p.record.wins + p.record.losses + p.record.draws;
+            map[f].totalWinPct += (p.record.wins / total) * 100;
+            map[f].withRecord++;
+        }
+    });
+    return Object.keys(map).map(function(k) {
+        var s = map[k];
+        s.avgWinPct = s.withRecord > 0 ? s.totalWinPct / s.withRecord : null;
+        return s;
+    }).sort(function(a, b) { return b.count - a.count; });
+}
+
+function computeDetachmentStats(placements) {
+    var map = {};
+    placements.forEach(function(p) {
+        if (!p.detachment) return;
+        var key = p.detachment;
+        if (!map[key]) map[key] = { detachment: p.detachment, faction: p.faction || 'Unknown', count: 0 };
+        map[key].count++;
+    });
+    return Object.keys(map).map(function(k) { return map[k]; })
+        .sort(function(a, b) { return b.count - a.count; })
+        .slice(0, 10);
+}
+
+function computeUnitStats(placements) {
+    var map = {};
+    placements.forEach(function(p) {
+        if (!p.army_list || !p.army_list.units) return;
+        p.army_list.units.forEach(function(u) {
+            var name = u.name || 'Unknown';
+            if (!map[name]) map[name] = { name: name, count: 0, totalPts: 0, withPts: 0 };
+            map[name].count++;
+            if (u.points != null) {
+                map[name].totalPts += u.points;
+                map[name].withPts++;
+            }
+        });
+    });
+    return Object.keys(map).map(function(k) {
+        var s = map[k];
+        s.avgPts = s.withPts > 0 ? Math.round(s.totalPts / s.withPts) : null;
+        return s;
+    }).sort(function(a, b) { return b.count - a.count; })
+      .slice(0, 15);
+}
+
+// ── Event Analytics Components ──────────────────────────────────
+
+function EventFactionChart(props) {
+    var stats = props.stats;
+    var chartRef = React.useRef(null);
+    var chartInstance = React.useRef(null);
+
+    React.useEffect(function() {
+        if (!chartRef.current || !stats || stats.length === 0) return;
+
+        if (chartInstance.current) {
+            chartInstance.current.destroy();
+        }
+
+        var cc = chartColors();
+        var ctx = chartRef.current.getContext('2d');
+        chartInstance.current = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: stats.map(function(s) { return s.faction; }),
+                datasets: [{
+                    label: 'Players',
+                    data: stats.map(function(s) { return s.count; }),
+                    backgroundColor: stats.map(function(s) { return getAllegianceColor(s.faction); }),
+                    borderColor: 'transparent',
+                    borderRadius: 4,
+                    barThickness: 18,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: cc.bg,
+                        titleColor: cc.gold,
+                        bodyColor: cc.text,
+                        borderColor: cc.border,
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(ctx) {
+                                var s = stats[ctx.dataIndex];
+                                var lines = [s.count + ' player' + (s.count !== 1 ? 's' : '')];
+                                if (s.avgWinPct != null) lines.push('Avg win rate: ' + s.avgWinPct.toFixed(1) + '%');
+                                lines.push('Best finish: #' + s.bestRank);
+                                return lines;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: cc.muted, stepSize: 1 },
+                        grid: { color: cc.border + '40' },
+                    },
+                    y: {
+                        ticks: { color: cc.text, font: { size: 12 } },
+                        grid: { display: false },
+                    }
+                }
+            }
+        });
+
+        return function() {
+            if (chartInstance.current) {
+                chartInstance.current.destroy();
+                chartInstance.current = null;
+            }
+        };
+    }, [stats]);
+
+    var height = Math.max(200, stats.length * 30 + 40);
+    return <div style={{height: height + 'px'}}><canvas ref={chartRef}></canvas></div>;
+}
+
+function EventFactionPerfTable(props) {
+    var stats = props.stats;
+    var withRecords = stats.filter(function(s) { return s.avgWinPct != null; });
+    if (withRecords.length === 0) return null;
+
+    var sorted = withRecords.slice().sort(function(a, b) { return b.avgWinPct - a.avgWinPct; });
+
+    return (
+        <table className="event-stat-table">
+            <thead>
+                <tr>
+                    <th>Faction</th>
+                    <th>Players</th>
+                    <th>Avg Win%</th>
+                    <th>Best Finish</th>
+                </tr>
+            </thead>
+            <tbody>
+                {sorted.map(function(s, i) {
+                    return (
+                        <tr key={s.faction} className={i === 0 ? 'top-performer' : ''}>
+                            <td><span className="faction-cell"><FactionIcon name={s.faction} size={16} />{s.faction}</span></td>
+                            <td>{s.count}</td>
+                            <td>{s.avgWinPct.toFixed(1)}%</td>
+                            <td>#{s.bestRank}</td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+        </table>
+    );
+}
+
+function EventDetachmentList(props) {
+    var stats = props.stats;
+    if (stats.length === 0) return null;
+
+    return (
+        <table className="event-stat-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Detachment</th>
+                    <th>Faction</th>
+                    <th>Players</th>
+                </tr>
+            </thead>
+            <tbody>
+                {stats.map(function(s, i) {
+                    return (
+                        <tr key={s.detachment + s.faction}>
+                            <td><span className={'event-stat-rank' + (i === 0 ? ' gold' : '')}>{i + 1}</span></td>
+                            <td>{s.detachment}</td>
+                            <td><span className="faction-cell"><FactionIcon name={s.faction} size={16} />{s.faction}</span></td>
+                            <td>{s.count}</td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+        </table>
+    );
+}
+
+function EventUnitList(props) {
+    var stats = props.stats;
+    if (stats.length === 0) return null;
+
+    return (
+        <table className="event-stat-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Unit</th>
+                    <th>Appearances</th>
+                    <th>Avg Pts</th>
+                </tr>
+            </thead>
+            <tbody>
+                {stats.map(function(s, i) {
+                    return (
+                        <tr key={s.name}>
+                            <td><span className={'event-stat-rank' + (i === 0 ? ' gold' : '')}>{i + 1}</span></td>
+                            <td>{s.name}</td>
+                            <td>{s.count}</td>
+                            <td>{s.avgPts != null ? s.avgPts : '\u2014'}</td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+        </table>
+    );
+}
+
+function EventAnalytics(props) {
+    var placements = props.placements;
+    if (!placements || placements.length === 0) return null;
+
+    var factionStats = React.useMemo(function() { return computeFactionStats(placements); }, [placements]);
+    var detachmentStats = React.useMemo(function() { return computeDetachmentStats(placements); }, [placements]);
+    var unitStats = React.useMemo(function() { return computeUnitStats(placements); }, [placements]);
+
+    var hasDetachments = detachmentStats.length > 0;
+    var hasUnits = unitStats.length > 0;
+
+    if (factionStats.length === 0) return null;
+
+    return (
+        <div className="event-analytics">
+            <div className="section-title">Tournament Analytics</div>
+            <div className="event-analytics-grid">
+                <div className="event-stat-card">
+                    <h3>Faction Representation</h3>
+                    <EventFactionChart stats={factionStats} />
+                </div>
+                <div className="event-stat-card">
+                    <h3>Faction Performance</h3>
+                    <EventFactionPerfTable stats={factionStats} />
+                    {hasDetachments ? (
+                        <div style={{marginTop: '1.5rem'}}>
+                            <h3>Top Detachments</h3>
+                            <EventDetachmentList stats={detachmentStats} />
+                        </div>
+                    ) : null}
+                </div>
+                {hasUnits ? (
+                    <div className="event-stat-card" style={{gridColumn: '1 / -1'}}>
+                        <h3>Most Popular Units</h3>
+                        <EventUnitList stats={unitStats} />
+                    </div>
+                ) : null}
+            </div>
         </div>
     );
 }
@@ -887,12 +1703,571 @@ function EventDetail(props) {
 var MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 var DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
+// ── Refresh Dialog ─────────────────────────────────────────────
+
+var PHASE_LABELS = {
+    idle: 'Preparing...',
+    checking_balance: 'Checking for balance changes...',
+    syncing_results: 'Syncing tournament results...',
+    discovering_future: 'Discovering upcoming events...',
+    repartitioning: 'Reorganizing epoch data...',
+    done: 'Complete'
+};
+
+var PHASE_STEPS = [
+    { key: 'checking_balance', label: 'Balance' },
+    { key: 'syncing_results', label: 'Sync' },
+    { key: 'discovering_future', label: 'Discover' },
+    { key: 'repartitioning', label: 'Reindex' },
+];
+
+function RefreshProgressBar(props) {
+    var progress = props.progress;
+    var phase = props.phase;
+    var isComplete = props.isComplete;
+
+    // Phase stepper
+    var phaseIndex = PHASE_STEPS.findIndex(function(s) { return s.key === phase; });
+    if (isComplete) phaseIndex = PHASE_STEPS.length;
+
+    // Event-level progress bar (during syncing_results)
+    var evTotal = progress.events_discovered || 0;
+    var evCurrent = progress.current_event_index || 0;
+    var evPct = evTotal > 0 ? Math.round((evCurrent / evTotal) * 100) : 0;
+
+    // Count from discovered_events for more accuracy
+    var discovered = progress.discovered_events || [];
+    var evDone = 0, evSyncing = 0;
+    discovered.forEach(function(ev) {
+        if (ev.status === 'done' || ev.status === 'skipped') evDone++;
+        else if (ev.status === 'syncing') evSyncing++;
+    });
+    if (discovered.length > 0) {
+        evPct = Math.round((evDone / discovered.length) * 100);
+    }
+
+    return (
+        <div className="refresh-progress-section">
+            <div className="refresh-stepper">
+                {PHASE_STEPS.map(function(step, i) {
+                    var cls = 'refresh-step';
+                    if (i < phaseIndex) cls += ' completed';
+                    else if (i === phaseIndex && !isComplete) cls += ' active';
+                    return (
+                        <div key={step.key} className={cls}>
+                            <div className="refresh-step-dot">
+                                {i < phaseIndex || isComplete ? '\u2713' : (i === phaseIndex ? (i + 1) : (i + 1))}
+                            </div>
+                            <span className="refresh-step-label">{step.label}</span>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {phase === 'syncing_results' && evTotal > 0 && (
+                <div className="refresh-bar-section">
+                    <div className="refresh-bar-header">
+                        <span className="refresh-bar-label">
+                            {discovered.length > 0
+                                ? (evDone + ' / ' + discovered.length + ' events')
+                                : (evCurrent + ' / ' + evTotal + ' events')}
+                        </span>
+                        <span className="refresh-bar-pct">{evPct}%</span>
+                    </div>
+                    <div className="refresh-bar-track">
+                        <div className="refresh-bar-fill" style={{width: evPct + '%'}}></div>
+                    </div>
+                    {progress.lists_normalized > 0 && (
+                        <div className="refresh-bar-sub">
+                            {progress.placements_synced} placements, {progress.lists_normalized} lists fetched
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {phase !== 'syncing_results' && phase !== 'done' && !isComplete && (
+                <div className="refresh-bar-section">
+                    <div className="refresh-bar-track indeterminate">
+                        <div className="refresh-bar-fill indeterminate"></div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function groupEventsByDate(events) {
+    var groups = {};
+    events.forEach(function(ev) {
+        var d = ev.date || 'Unknown';
+        if (!groups[d]) groups[d] = [];
+        groups[d].push(ev);
+    });
+    return Object.keys(groups).sort().map(function(date) {
+        return { date: date, events: groups[date] };
+    });
+}
+
+function formatDateHeader(dateStr) {
+    if (!dateStr || dateStr === 'Unknown') return 'Unknown Date';
+    try {
+        var d = new Date(dateStr + 'T12:00:00');
+        var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return days[d.getDay()] + ' ' + d.getDate() + ' ' + months[d.getMonth()];
+    } catch(e) { return dateStr; }
+}
+
+function SyncEventList(props) {
+    var events = props.events || [];
+    var isRunning = props.isRunning;
+    var listRef = React.useRef(null);
+    var groups = groupEventsByDate(events);
+
+    // Compute summary counts
+    var done = 0, syncing = 0, pending = 0, skipped = 0, totalPlc = 0, totalLists = 0;
+    events.forEach(function(ev) {
+        if (ev.status === 'done') { done++; totalPlc += ev.placements_found; totalLists += ev.lists_found; }
+        else if (ev.status === 'syncing') syncing++;
+        else if (ev.status === 'skipped') skipped++;
+        else pending++;
+    });
+
+    React.useEffect(function() {
+        if (!isRunning || !listRef.current) return;
+        var active = listRef.current.querySelector('.sync-event-item.syncing');
+        if (active) active.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, [events, isRunning]);
+
+    var total = done + syncing + pending;
+    var listPct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    return (
+        <div>
+            <div className="sync-summary">
+                <span className="sync-summary-item done">{done} done</span>
+                {syncing > 0 && <span className="sync-summary-item syncing">{syncing} active</span>}
+                <span className="sync-summary-item pending">{pending} pending</span>
+                {skipped > 0 && <span className="sync-summary-item skipped">{skipped} skipped</span>}
+                <span className="sync-summary-sep">|</span>
+                <span className="sync-summary-totals">{totalPlc} plc / {totalLists} lists</span>
+            </div>
+            {isRunning && total > 0 && (
+                <div className="sync-mini-bar">
+                    <div className="sync-mini-bar-fill" style={{width: listPct + '%'}}></div>
+                </div>
+            )}
+            <div className="sync-event-list" ref={listRef}>
+                {groups.map(function(group) {
+                    var groupDone = group.events.filter(function(e) { return e.status === 'done'; }).length;
+                    var groupTotal = group.events.filter(function(e) { return e.status !== 'skipped'; }).length;
+                    return (
+                        <div key={group.date}>
+                            <div className="sync-date-header">
+                                <span>{formatDateHeader(group.date)}</span>
+                                <span className="sync-date-count">{groupDone}/{groupTotal}</span>
+                            </div>
+                            {group.events.map(function(ev, i) {
+                                var cls = 'sync-event-item ' + ev.status;
+                                return (
+                                    <div key={i} className={cls}>
+                                        <div className="sync-event-row">
+                                            <span className="sync-event-name">{ev.name}</span>
+                                            <span className="sync-event-players">{ev.player_count}p</span>
+                                            {ev.status === 'done' && (
+                                                <span className="sync-event-counts">{ev.placements_found}/{ev.lists_found}</span>
+                                            )}
+                                            {ev.status === 'syncing' && (
+                                                <span className={'sync-event-badge syncing'}>Syncing</span>
+                                            )}
+                                            {ev.status === 'skipped' && (
+                                                <span className={'sync-event-badge skipped'}>Skip</span>
+                                            )}
+                                        </div>
+                                        {ev.status === 'syncing' && ev.detail && (
+                                            <div className="sync-event-detail">{ev.detail}</div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+function RefreshDialog(props) {
+    var onClose = props.onClose;
+    var allEvents = props.allEvents || [];
+
+    var todayStr = new Date().toISOString().slice(0, 10);
+    var cutoffStr = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+    var defaultFrom = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+
+    var ref1 = React.useState('preview'); var stage = ref1[0]; var setStage = ref1[1];
+    var ref2 = React.useState(null); var preview = ref2[0]; var setPreview = ref2[1];
+    var ref3 = React.useState(null); var status = ref3[0]; var setStatus = ref3[1];
+    var ref4 = React.useState(null); var error = ref4[0]; var setError = ref4[1];
+    var ref5 = React.useState(defaultFrom); var dateFrom = ref5[0]; var setDateFrom = ref5[1];
+    var ref6 = React.useState(todayStr); var dateTo = ref6[0]; var setDateTo = ref6[1];
+    var ref7 = React.useState('from'); var selectMode = ref7[0]; var setSelectMode = ref7[1]; // 'from' or 'to'
+    var ref10 = React.useState(null); var inspectDate = ref10[0]; var setInspectDate = ref10[1];
+    var pollRef = React.useRef(null);
+
+    // Build event lookup: date -> { count, completed, events[] }
+    var eventsByDate = React.useMemo(function() {
+        var map = {};
+        allEvents.forEach(function(ev) {
+            if (!ev.date) return;
+            if (!map[ev.date]) map[ev.date] = { count: 0, completed: 0, events: [] };
+            map[ev.date].count++;
+            if (ev.completed) map[ev.date].completed++;
+            map[ev.date].events.push(ev);
+        });
+        return map;
+    }, [allEvents]);
+
+    // Calendar state - default to current month
+    var nowCal = new Date();
+    var ref8 = React.useState(nowCal.getFullYear()); var calYear = ref8[0]; var setCalYear = ref8[1];
+    var ref9 = React.useState(nowCal.getMonth()); var calMonth = ref9[0]; var setCalMonth = ref9[1];
+
+    function loadPreview(from, to) {
+        Api.getRefreshPreview(from, to).then(function(data) {
+            setPreview(data);
+            if (data.refresh_status === 'running') {
+                setStage('running');
+                startPolling();
+            }
+        }).catch(function(e) {
+            setError('Failed to load preview: ' + e.message);
+        });
+    }
+
+    React.useEffect(function() {
+        loadPreview(dateFrom, dateTo);
+        return function() { if (pollRef.current) clearInterval(pollRef.current); };
+    }, []);
+
+    function handleCalDateClick(dateStr) {
+        // Always set inspect date so we can see event details
+        setInspectDate(dateStr === inspectDate ? null : dateStr);
+
+        if (dateStr > todayStr) return; // no future range selection
+        if (selectMode === 'from') {
+            var newFrom = dateStr;
+            var newTo = dateTo;
+            if (newFrom > newTo) newTo = newFrom;
+            setDateFrom(newFrom);
+            setDateTo(newTo);
+            setSelectMode('to');
+            loadPreview(newFrom, newTo);
+        } else {
+            var newTo2 = dateStr;
+            var newFrom2 = dateFrom;
+            if (newTo2 < newFrom2) newFrom2 = newTo2;
+            setDateFrom(newFrom2);
+            setDateTo(newTo2);
+            setSelectMode('from');
+            loadPreview(newFrom2, newTo2);
+        }
+    }
+
+    function calPrev() {
+        if (calMonth === 0) { setCalMonth(11); setCalYear(calYear - 1); }
+        else setCalMonth(calMonth - 1);
+    }
+    function calNext() {
+        // Don't navigate past current month
+        var now = new Date();
+        if (calYear === now.getFullYear() && calMonth >= now.getMonth()) return;
+        if (calMonth === 11) { setCalMonth(0); setCalYear(calYear + 1); }
+        else setCalMonth(calMonth + 1);
+    }
+
+    function startPolling() {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(function() {
+            Api.getRefreshStatus().then(function(data) {
+                setStatus(data);
+                if (data.status === 'completed' || data.status === 'failed') {
+                    clearInterval(pollRef.current);
+                    pollRef.current = null;
+                    setStage('complete');
+                }
+            }).catch(function() {});
+        }, 1500);
+    }
+
+    function handleStart() {
+        setError(null);
+        Api.startRefresh(dateFrom, dateTo).then(function(data) {
+            setStatus(data);
+            setStage('running');
+            startPolling();
+        }).catch(function(e) {
+            if (e.message.includes('409')) {
+                setStage('running');
+                startPolling();
+            } else {
+                setError('Failed to start refresh: ' + e.message);
+            }
+        });
+    }
+
+    function handleClose() {
+        if (pollRef.current) clearInterval(pollRef.current);
+        onClose(stage === 'complete');
+    }
+
+    function setPreset(days) {
+        var from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+        setDateFrom(from);
+        setDateTo(todayStr);
+        // Navigate calendar to the from month
+        var p = from.split('-');
+        setCalYear(Number(p[0]));
+        setCalMonth(Number(p[1]) - 1);
+        loadPreview(from, todayStr);
+    }
+
+    // Build calendar grid
+    var firstDay = new Date(calYear, calMonth, 1).getDay();
+    var daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    var calWeeks = [];
+    var cd = 1;
+    for (var cw = 0; cw < 6; cw++) {
+        var week = [];
+        for (var cdi = 0; cdi < 7; cdi++) {
+            if ((cw === 0 && cdi < firstDay) || cd > daysInMonth) { week.push(null); }
+            else { week.push(cd); cd++; }
+        }
+        calWeeks.push(week);
+        if (cd > daysInMonth) break;
+    }
+
+    var miniDays = ['S','M','T','W','T','F','S'];
+
+    return (
+        <div className="refresh-overlay" onClick={handleClose}>
+            <div className="refresh-dialog" onClick={function(e) { e.stopPropagation(); }}>
+                <div className="refresh-dialog-header">
+                    <h3>Refresh Data</h3>
+                    <button className="refresh-close-btn" onClick={handleClose}>{'\u2715'}</button>
+                </div>
+
+                {error && <div className="refresh-error">{error}</div>}
+
+                {stage === 'preview' && (
+                    <div className="refresh-body">
+                        <div className="refresh-range-display">
+                            <span className={'refresh-range-end' + (selectMode === 'from' ? ' selecting' : '')} onClick={function() { setSelectMode('from'); }}>{dateFrom}</span>
+                            <span className="refresh-range-arrow">{'\u2192'}</span>
+                            <span className={'refresh-range-end' + (selectMode === 'to' ? ' selecting' : '')} onClick={function() { setSelectMode('to'); }}>{dateTo}</span>
+                        </div>
+
+                        <div className="refresh-mini-cal">
+                            <div className="refresh-mini-nav">
+                                <button className="refresh-mini-nav-btn" onClick={calPrev}>{'\u2190'}</button>
+                                <span className="refresh-mini-title">{MONTH_NAMES[calMonth]} {calYear}</span>
+                                <button className="refresh-mini-nav-btn" onClick={calNext}>{'\u2192'}</button>
+                            </div>
+                            <div className="refresh-mini-header">
+                                {miniDays.map(function(d, i) { return <div key={i} className="refresh-mini-hcell">{d}</div>; })}
+                            </div>
+                            {calWeeks.map(function(week, wi) {
+                                return (
+                                    <div key={wi} className="refresh-mini-row">
+                                        {week.map(function(dayNum, di) {
+                                            if (dayNum === null) return <div key={di} className="refresh-mini-cell empty"></div>;
+                                            var ds = calYear + '-' + String(calMonth + 1).padStart(2, '0') + '-' + String(dayNum).padStart(2, '0');
+                                            var isFuture = ds > todayStr;
+                                            var inRange = ds >= dateFrom && ds <= dateTo;
+                                            var isFrom = ds === dateFrom;
+                                            var isTo = ds === dateTo;
+                                            var evInfo = eventsByDate[ds];
+                                            var cls = 'refresh-mini-cell';
+                                            if (isFuture) cls += ' future';
+                                            if (inRange) cls += ' in-range';
+                                            if (isFrom) cls += ' range-start';
+                                            if (isTo) cls += ' range-end';
+                                            if (ds === todayStr) cls += ' today';
+                                            if (evInfo) {
+                                                if (isFuture) cls += ' ev-scheduled';
+                                                else if (ds >= cutoffStr) cls += ' ev-ok'; // within last 3 days — don't mark as missing
+                                                else if (evInfo.completed >= evInfo.count) cls += ' ev-ok';
+                                                else if (evInfo.completed > 0) cls += ' ev-ok'; // partial is fine
+                                                else cls += ' ev-missing'; // no data at all
+                                            }
+
+                                            var isInspected = ds === inspectDate;
+                                            if (isInspected) cls += ' inspected';
+
+                                            return (
+                                                <div key={di} className={cls} onClick={function() { handleCalDateClick(ds); }}>
+                                                    <span className="refresh-mini-num">{dayNum}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                );
+                            })}
+                            <div className="refresh-mini-legend">
+                                <span className="refresh-legend-item"><span className="refresh-legend-swatch ok"></span> Results</span>
+                                <span className="refresh-legend-item"><span className="refresh-legend-swatch missing"></span> No data</span>
+                                <span className="refresh-legend-item"><span className="refresh-legend-swatch scheduled"></span> Upcoming</span>
+                            </div>
+
+                            {inspectDate && eventsByDate[inspectDate] && (
+                                <div className="refresh-inspect">
+                                    <div className="refresh-inspect-header">
+                                        <span>{inspectDate}</span>
+                                        <span className="refresh-inspect-count">{eventsByDate[inspectDate].count} event{eventsByDate[inspectDate].count !== 1 ? 's' : ''}</span>
+                                    </div>
+                                    {eventsByDate[inspectDate].events.map(function(ev) {
+                                        var isPast = ev.date <= todayStr;
+                                        var isRecent = ev.date >= cutoffStr;
+                                        var statusCls = isPast ? (ev.completed ? 'inspect-ok' : (isRecent ? 'inspect-ok' : 'inspect-missing')) : 'inspect-scheduled';
+                                        var statusLabel = isPast ? (ev.completed ? 'Loaded' : (isRecent ? 'Recent' : 'No data')) : 'Upcoming';
+                                        return (
+                                            <div key={ev.id} className={'refresh-inspect-event ' + statusCls}>
+                                                <div className="refresh-inspect-top">
+                                                    <span className="refresh-inspect-name">{ev.name}</span>
+                                                    <span className={'refresh-inspect-status ' + statusCls}>{statusLabel}</span>
+                                                </div>
+                                                <div className="refresh-inspect-meta">
+                                                    {ev.player_count ? ev.player_count + ' players' : ''}
+                                                    {ev.location ? (ev.player_count ? ' \u00b7 ' : '') + ev.location : ''}
+                                                </div>
+                                                {ev.completed && ev.winner && (
+                                                    <div className="refresh-inspect-winner">
+                                                        Winner: {ev.winner.player_name} ({ev.winner.faction})
+                                                    </div>
+                                                )}
+                                                {ev.completed && ev.has_lists && (
+                                                    <div className="refresh-inspect-tag">Army lists available</div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {inspectDate && !eventsByDate[inspectDate] && (
+                                <div className="refresh-inspect">
+                                    <div className="refresh-inspect-header">
+                                        <span>{inspectDate}</span>
+                                    </div>
+                                    <div className="refresh-inspect-empty">No tournaments on this date</div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="refresh-presets-row">
+                            <span className="refresh-presets-label">Quick select:</span>
+                            <select className="refresh-presets-select" value="" onChange={function(e) { if (e.target.value) setPreset(Number(e.target.value)); e.target.value = ''; }}>
+                                <option value="">Last...</option>
+                                <option value="7">7 days</option>
+                                <option value="14">14 days</option>
+                                <option value="30">30 days</option>
+                                <option value="60">60 days</option>
+                                <option value="90">90 days</option>
+                            </select>
+                        </div>
+
+                        {preview ? (
+                            <div>
+                                {preview.scheduled_without_data > 0 ? (
+                                    <div className="refresh-missing-banner">
+                                        <span className="refresh-missing-count">{preview.scheduled_without_data}</span>
+                                        <span className="refresh-missing-text">tournament{preview.scheduled_without_data !== 1 ? 's' : ''} missing results</span>
+                                    </div>
+                                ) : (
+                                    <div className="refresh-ok-banner">All past tournaments have results</div>
+                                )}
+                                <div className="refresh-stats-row">
+                                    <div className="refresh-stat">
+                                        <span className="refresh-stat-val">{preview.events_in_range}</span>
+                                        <span className="refresh-stat-label">in range</span>
+                                    </div>
+                                    <div className="refresh-stat">
+                                        <span className="refresh-stat-val">{preview.events_with_results}</span>
+                                        <span className="refresh-stat-label">with results</span>
+                                    </div>
+                                    <div className="refresh-stat">
+                                        <span className="refresh-stat-val">{preview.total_events}</span>
+                                        <span className="refresh-stat-label">total tracked</span>
+                                    </div>
+                                </div>
+                                <button className="refresh-start-btn" onClick={handleStart}>
+                                    {preview.scheduled_without_data > 0 ? 'Fetch Missing Data' : 'Refresh All'}
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="loading"><div className="spinner"></div>Loading preview...</div>
+                        )}
+                    </div>
+                )}
+
+                {(stage === 'running' || stage === 'complete') && status && (
+                    <div className="refresh-body">
+                        {stage === 'complete' && (
+                            <div className={'refresh-result ' + (status.status === 'completed' ? 'success' : 'failure')}>
+                                {status.status === 'completed' ? 'Refresh completed' : 'Refresh completed with errors'}
+                            </div>
+                        )}
+                        <RefreshProgressBar progress={status.progress || {}} phase={status.phase} isComplete={stage === 'complete'} />
+
+                        {stage === 'running' && status.progress && status.progress.message && (
+                            <div className="refresh-message">{status.progress.message}</div>
+                        )}
+
+                        {status.progress && status.progress.discovered_events && status.progress.discovered_events.length > 0 ? (
+                            <SyncEventList events={status.progress.discovered_events} isRunning={stage === 'running'} />
+                        ) : null}
+                        {status.progress && status.progress.total_events > 0 && (
+                            <div className="refresh-counters" style={{marginTop: '8px', opacity: 0.7, borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px'}}>
+                                <div className="refresh-counter">
+                                    <span className="refresh-counter-val">{status.progress.total_events}</span>
+                                    <span className="refresh-counter-label">DB events</span>
+                                </div>
+                                <div className="refresh-counter">
+                                    <span className="refresh-counter-val">{status.progress.total_placements}</span>
+                                    <span className="refresh-counter-label">DB placements</span>
+                                </div>
+                                <div className="refresh-counter">
+                                    <span className="refresh-counter-val">{status.progress.total_lists}</span>
+                                    <span className="refresh-counter-label">DB lists</span>
+                                </div>
+                            </div>
+                        )}
+                        {status.errors && status.errors.length > 0 && (
+                            <div className="refresh-errors">
+                                <div className="refresh-errors-header">Errors ({status.errors.length})</div>
+                                {status.errors.map(function(err, i) {
+                                    return <div key={i} className="refresh-error-item">{err}</div>;
+                                })}
+                            </div>
+                        )}
+                        {stage === 'complete' && (
+                            <button className="refresh-start-btn" onClick={handleClose}>Close</button>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ── Calendar View ──────────────────────────────────────────────
+
 function CalendarView(props) {
     var allEvents = props.allEvents || [];
     var balancePasses = props.balancePasses || [];
     var onSelectEvent = props.onSelectEvent;
     var onSelectBalancePass = props.onSelectBalancePass;
-
     // Default to the current month
     var now = new Date();
     var ref1 = React.useState(now.getFullYear());
@@ -1325,6 +2700,7 @@ function FactionTrendsChart(props) {
 
         var bpLines = trends.balance_passes || [];
 
+        var cc = chartColors();
         var ctx = chartRef.current.getContext('2d');
         chartInstance.current = new Chart(ctx, {
             type: 'line',
@@ -1346,25 +2722,25 @@ function FactionTrendsChart(props) {
                 plugins: {
                     legend: {
                         position: 'bottom',
-                        labels: { color: '#c8cad0', font: { size: 11 }, boxWidth: 12 }
+                        labels: { color: cc.text, font: { size: 11 }, boxWidth: 12 }
                     },
                     tooltip: {
-                        backgroundColor: '#1c1d2b',
-                        titleColor: '#c9a84c',
-                        bodyColor: '#c8cad0',
-                        borderColor: '#2e3048',
+                        backgroundColor: cc.bg,
+                        titleColor: cc.gold,
+                        bodyColor: cc.text,
+                        borderColor: cc.border,
                         borderWidth: 1,
                     }
                 },
                 scales: {
                     x: {
-                        grid: { color: '#2e3048' },
-                        ticks: { color: '#7a7d8a', font: { size: 11 } },
+                        grid: { color: cc.border },
+                        ticks: { color: cc.muted, font: { size: 11 } },
                     },
                     y: {
-                        grid: { color: '#2e3048' },
-                        ticks: { color: '#7a7d8a', font: { size: 11 } },
-                        title: { display: true, text: label, color: '#7a7d8a', font: { size: 11 } },
+                        grid: { color: cc.border },
+                        ticks: { color: cc.muted, font: { size: 11 } },
+                        title: { display: true, text: label, color: cc.muted, font: { size: 11 } },
                     }
                 }
             },
@@ -1549,6 +2925,673 @@ function TopUnitsChart(props) {
     );
 }
 
+// ── Traffic Chart (time-series line chart) ───────────────────────
+
+function TrafficChart(props) {
+    var timeSeries = props.timeSeries;
+    var chartRef = React.useRef(null);
+    var chartInstance = React.useRef(null);
+
+    React.useEffect(function() {
+        if (!chartRef.current || !timeSeries || timeSeries.length === 0) return;
+
+        if (chartInstance.current) {
+            chartInstance.current.destroy();
+        }
+
+        var cc = chartColors();
+        var labels = timeSeries.map(function(p) {
+            var d = new Date(p.time);
+            return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+        });
+
+        var ctx = chartRef.current.getContext('2d');
+        chartInstance.current = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Total',
+                        data: timeSeries.map(function(p) { return p.total; }),
+                        borderColor: cc.gold,
+                        backgroundColor: cc.gold + '22',
+                        fill: true,
+                        pointRadius: 0,
+                        tension: 0.3,
+                        borderWidth: 2,
+                    },
+                    {
+                        label: 'Page Views',
+                        data: timeSeries.map(function(p) { return p.page_views; }),
+                        borderColor: '#4caf50',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.3,
+                        borderWidth: 1.5,
+                    },
+                    {
+                        label: 'API',
+                        data: timeSeries.map(function(p) { return p.api_requests; }),
+                        borderColor: '#42a5f5',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.3,
+                        borderWidth: 1.5,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { color: cc.muted, font: { size: 10 }, boxWidth: 12, padding: 8 }
+                    },
+                    tooltip: {
+                        backgroundColor: cc.bg,
+                        titleColor: cc.gold,
+                        bodyColor: cc.text,
+                        borderColor: cc.border,
+                        borderWidth: 1,
+                        mode: 'index',
+                        intersect: false,
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: cc.muted, font: { size: 9 }, maxTicksLimit: 12 },
+                        grid: { color: cc.border + '33' }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: { color: cc.muted, font: { size: 9 } },
+                        grid: { color: cc.border + '33' }
+                    }
+                }
+            }
+        });
+
+        return function() {
+            if (chartInstance.current) {
+                chartInstance.current.destroy();
+                chartInstance.current = null;
+            }
+        };
+    }, [timeSeries]);
+
+    if (!timeSeries || timeSeries.length === 0) return null;
+
+    return (
+        <div className="traffic-section">
+            <div className="traffic-section-title">Requests Over Time</div>
+            <div className="traffic-chart-container">
+                <canvas ref={chartRef}></canvas>
+            </div>
+        </div>
+    );
+}
+
+// ── Country flag helper ─────────────────────────────────────────
+
+function countryFlag(code) {
+    if (!code || code.length !== 2) return '';
+    var upper = code.toUpperCase();
+    return String.fromCodePoint(upper.charCodeAt(0) + 127397) +
+           String.fromCodePoint(upper.charCodeAt(1) + 127397);
+}
+
+// ── Traffic Monitor Popup ────────────────────────────────────────
+
+function TrafficPopup(props) {
+    var onClose = props.onClose;
+    var ref1 = React.useState(null); var data = ref1[0]; var setData = ref1[1];
+    var ref2 = React.useState(true); var loading = ref2[0]; var setLoading = ref2[1];
+    var ref3 = React.useState({}); var geoData = ref3[0]; var setGeoData = ref3[1];
+    var geoCacheRef = React.useRef({});
+
+    function loadData() {
+        Api.getTraffic().then(function(d) {
+            setData(d);
+            setLoading(false);
+        }).catch(function() { setLoading(false); });
+    }
+
+    React.useEffect(function() {
+        loadData();
+        var interval = setInterval(loadData, 5000);
+        return function() { clearInterval(interval); };
+    }, []);
+
+    // Fetch geo data when external_ips change
+    React.useEffect(function() {
+        if (!data || !data.external_ips || data.external_ips.length === 0) return;
+
+        var uncached = data.external_ips
+            .map(function(e) { return e.ip; })
+            .filter(function(ip) { return !geoCacheRef.current[ip]; });
+
+        if (uncached.length === 0) return;
+
+        Api.getTrafficGeo(uncached).then(function(results) {
+            var updated = Object.assign({}, geoCacheRef.current);
+            results.forEach(function(r) {
+                if (r.country) {
+                    updated[r.ip] = { country: r.country, city: r.city, country_code: r.country_code };
+                }
+            });
+            geoCacheRef.current = updated;
+            setGeoData(updated);
+        }).catch(function() { /* ignore geo errors */ });
+    }, [data && data.external_ips ? data.external_ips.map(function(e) { return e.ip; }).join(',') : '']);
+
+    function formatUptime(seconds) {
+        var h = Math.floor(seconds / 3600);
+        var m = Math.floor((seconds % 3600) / 60);
+        var s = seconds % 60;
+        if (h > 0) return h + 'h ' + m + 'm';
+        if (m > 0) return m + 'm ' + s + 's';
+        return s + 's';
+    }
+
+    // Build country summary
+    function buildCountrySummary() {
+        if (!data || !data.external_ips) return [];
+        var byCountry = {};
+        data.external_ips.forEach(function(entry) {
+            var geo = geoData[entry.ip];
+            if (!geo || !geo.country) return;
+            var key = geo.country_code || geo.country;
+            if (!byCountry[key]) {
+                byCountry[key] = { country: geo.country, country_code: geo.country_code, ips: 0, requests: 0 };
+            }
+            byCountry[key].ips += 1;
+            byCountry[key].requests += entry.requests;
+        });
+        return Object.values(byCountry).sort(function(a, b) { return b.requests - a.requests; });
+    }
+
+    var countrySummary = data ? buildCountrySummary() : [];
+
+    return (
+        <div className="traffic-overlay" onClick={onClose}>
+            <div className="traffic-popup" onClick={function(e) { e.stopPropagation(); }}>
+                <div className="traffic-header">
+                    <span className="traffic-title">Traffic Monitor</span>
+                    <button className="refresh-close-btn" onClick={onClose}>{'\u2715'}</button>
+                </div>
+                {loading && <div className="loading"><div className="spinner"></div>Loading...</div>}
+                {data && (
+                    <div className="traffic-body">
+                        <div className="traffic-stats-grid">
+                            <div className="traffic-stat-card">
+                                <span className="traffic-stat-value">{data.external_visitors}</span>
+                                <span className="traffic-stat-label">External IPs</span>
+                            </div>
+                            <div className="traffic-stat-card">
+                                <span className="traffic-stat-value">{data.total_requests}</span>
+                                <span className="traffic-stat-label">Total Requests</span>
+                            </div>
+                            <div className="traffic-stat-card">
+                                <span className="traffic-stat-value">{data.page_views}</span>
+                                <span className="traffic-stat-label">Page Views</span>
+                            </div>
+                            <div className="traffic-stat-card">
+                                <span className="traffic-stat-value">{formatUptime(data.uptime_seconds)}</span>
+                                <span className="traffic-stat-label">Uptime</span>
+                            </div>
+                        </div>
+                        <TrafficChart timeSeries={data.time_series} />
+                        {data.external_ips && data.external_ips.length > 0 && (
+                            <div className="traffic-section">
+                                <div className="traffic-section-title">External Visitors</div>
+                                {data.external_ips.map(function(ip) {
+                                    var geo = geoData[ip.ip];
+                                    return (
+                                        <div key={ip.ip} className="traffic-ip-row">
+                                            <div className="traffic-ip-info">
+                                                <span className="traffic-ip">{ip.ip}</span>
+                                                {geo && geo.country && (
+                                                    <span className="traffic-ip-geo">
+                                                        {countryFlag(geo.country_code)}{' '}
+                                                        {geo.city ? geo.city + ', ' : ''}{geo.country}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <span className="traffic-ip-count">{ip.requests} reqs</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        {data.external_ips && data.external_ips.length === 0 && (
+                            <div className="traffic-section">
+                                <div className="traffic-empty">No external visitors yet - only localhost traffic</div>
+                            </div>
+                        )}
+                        {countrySummary.length > 0 && (
+                            <div className="traffic-section">
+                                <div className="traffic-section-title">Visitors by Country</div>
+                                {countrySummary.map(function(c) {
+                                    return (
+                                        <div key={c.country_code} className="traffic-ip-row traffic-country-row">
+                                            <span className="traffic-ip">
+                                                {countryFlag(c.country_code)} {c.country}
+                                            </span>
+                                            <span className="traffic-ip-count">
+                                                {c.ips} {c.ips === 1 ? 'IP' : 'IPs'} &middot; {c.requests} reqs
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        {data.paths && data.paths.length > 0 && (
+                            <div className="traffic-section">
+                                <div className="traffic-section-title">Top Paths</div>
+                                {data.paths.slice(0, 10).map(function(p) {
+                                    return (
+                                        <div key={p.path} className="traffic-ip-row">
+                                            <span className="traffic-path">{p.path}</span>
+                                            <span className="traffic-ip-count">{p.requests}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ── Detachment Stats Panel ──────────────────────────────────────
+
+function DetachmentStatsPanel(props) {
+    var ref1 = React.useState(null); var data = ref1[0]; var setData = ref1[1];
+    var ref2 = React.useState(true); var loading = ref2[0]; var setLoading = ref2[1];
+    var ref3 = React.useState(''); var factionFilter = ref3[0]; var setFactionFilter = ref3[1];
+    var ref4 = React.useState('avg_win_rate'); var sortBy = ref4[0]; var setSortBy = ref4[1];
+    var ref5 = React.useState(true); var sortDesc = ref5[0]; var setSortDesc = ref5[1];
+
+    React.useEffect(function() {
+        setLoading(true);
+        Api.getDetachmentStats(null, null, 3).then(function(d) {
+            setData(d);
+            setLoading(false);
+        }).catch(function() { setLoading(false); });
+    }, []);
+
+    if (loading) return <div className="loading"><div className="spinner"></div>Loading detachment stats...</div>;
+    if (!data || !data.detachments || data.detachments.length === 0) {
+        return <div className="cal-no-events">No detachment data available. Run link-lists to connect army lists to placements.</div>;
+    }
+
+    var factions = [];
+    var seen = {};
+    data.detachments.forEach(function(d) {
+        if (!seen[d.faction]) { factions.push(d.faction); seen[d.faction] = true; }
+    });
+    factions.sort();
+
+    var filtered = data.detachments;
+    if (factionFilter) {
+        filtered = filtered.filter(function(d) { return d.faction === factionFilter; });
+    }
+
+    var sorted = filtered.slice().sort(function(a, b) {
+        var va = a[sortBy] || 0;
+        var vb = b[sortBy] || 0;
+        return sortDesc ? vb - va : va - vb;
+    });
+
+    function handleSort(col) {
+        if (sortBy === col) { setSortDesc(!sortDesc); }
+        else { setSortBy(col); setSortDesc(true); }
+    }
+
+    var sortArrow = function(col) { return sortBy === col ? (sortDesc ? ' \u25BC' : ' \u25B2') : ''; };
+
+    return (
+        <div className="detachment-panel">
+            <div className="detachment-filter-row">
+                <select value={factionFilter} onChange={function(e) { setFactionFilter(e.target.value); }} className="detachment-filter-select">
+                    <option value="">All Factions</option>
+                    {factions.map(function(f) { return <option key={f} value={f}>{f}</option>; })}
+                </select>
+            </div>
+            <div className="detachment-table">
+                <div className="dt-header-row">
+                    <span className="dt-col-faction">Faction</span>
+                    <span className="dt-col-detach">Detachment</span>
+                    <span className="dt-col-num clickable" onClick={function() { handleSort('count'); }}>Count{sortArrow('count')}</span>
+                    <span className="dt-col-num clickable" onClick={function() { handleSort('avg_win_rate'); }}>Win Rate{sortArrow('avg_win_rate')}</span>
+                    <span className="dt-col-num clickable" onClick={function() { handleSort('avg_rank'); }}>Avg Rank{sortArrow('avg_rank')}</span>
+                    <span className="dt-col-num clickable" onClick={function() { handleSort('top4_count'); }}>Top 4{sortArrow('top4_count')}</span>
+                    <span className="dt-col-num clickable" onClick={function() { handleSort('avg_battle_points'); }}>Avg BP{sortArrow('avg_battle_points')}</span>
+                </div>
+                {sorted.map(function(d, i) {
+                    var wrPct = d.avg_win_rate.toFixed(1);
+                    var wrClass = d.avg_win_rate > 55 ? 'wr-hot' : d.avg_win_rate < 45 ? 'wr-cold' : 'wr-neutral';
+                    return (
+                        <div key={i} className="dt-row">
+                            <span className="dt-col-faction"><FactionIcon name={d.faction} />{d.faction}</span>
+                            <span className="dt-col-detach">{d.detachment || 'Unknown'}</span>
+                            <span className="dt-col-num">{d.count}</span>
+                            <span className={'dt-col-num ' + wrClass}>
+                                {wrPct}%
+                                <div className="dt-wr-bar"><div className="dt-wr-fill" style={{ width: wrPct + '%' }}></div></div>
+                            </span>
+                            <span className="dt-col-num">{d.avg_rank.toFixed(1)}</span>
+                            <span className="dt-col-num">{d.top4_count}</span>
+                            <span className="dt-col-num">{d.avg_battle_points != null ? d.avg_battle_points.toFixed(0) : '-'}</span>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+// ── Unit Performance Panel (with Overrepresentation + Efficiency) ──
+
+function UnitPerformancePanel(props) {
+    var ref1 = React.useState(null); var perfData = ref1[0]; var setPerfData = ref1[1];
+    var ref2 = React.useState(null); var effData = ref2[0]; var setEffData = ref2[1];
+    var ref3 = React.useState(true); var loading = ref3[0]; var setLoading = ref3[1];
+    var ref4 = React.useState(''); var factionFilter = ref4[0]; var setFactionFilter = ref4[1];
+    var ref5 = React.useState('overrepresentation'); var viewMode = ref5[0]; var setViewMode = ref5[1];
+
+    React.useEffect(function() {
+        setLoading(true);
+        Promise.all([
+            Api.getUnitPerformance(null, null, 5),
+            Api.getPointsEfficiency(null, null),
+        ]).then(function(results) {
+            setPerfData(results[0]);
+            setEffData(results[1]);
+            setLoading(false);
+        }).catch(function() { setLoading(false); });
+    }, []);
+
+    if (loading) return <div className="loading"><div className="spinner"></div>Loading unit performance...</div>;
+
+    var currentData = viewMode === 'overrepresentation' ? perfData : effData;
+    if (!currentData || !currentData.units || currentData.units.length === 0) {
+        return <div className="cal-no-events">No unit performance data available. Run link-lists to connect army lists to placements.</div>;
+    }
+
+    var factions = [];
+    var seen = {};
+    currentData.units.forEach(function(u) {
+        if (u.faction && !seen[u.faction]) { factions.push(u.faction); seen[u.faction] = true; }
+    });
+    factions.sort();
+
+    var units = currentData.units;
+    if (factionFilter) {
+        units = units.filter(function(u) { return u.faction === factionFilter; });
+    }
+
+    if (viewMode === 'overrepresentation') {
+        units = units.slice().sort(function(a, b) { return (b.overrepresentation || 0) - (a.overrepresentation || 0); });
+    } else {
+        units = units.slice().sort(function(a, b) { return (b.efficiency_score || 0) - (a.efficiency_score || 0); });
+    }
+
+    var top15 = units.slice(0, 15);
+
+    return (
+        <div className="unit-perf-panel">
+            <div className="unit-perf-controls">
+                <select value={factionFilter} onChange={function(e) { setFactionFilter(e.target.value); }} className="detachment-filter-select">
+                    <option value="">All Factions</option>
+                    {factions.map(function(f) { return <option key={f} value={f}>{f}</option>; })}
+                </select>
+                <div className="chart-tabs" style={{ flex: 1 }}>
+                    <button className={'chart-tab' + (viewMode === 'overrepresentation' ? ' active' : '')}
+                        onClick={function() { setViewMode('overrepresentation'); }}>Overrepresentation</button>
+                    <button className={'chart-tab' + (viewMode === 'efficiency' ? ' active' : '')}
+                        onClick={function() { setViewMode('efficiency'); }}>Points Efficiency</button>
+                </div>
+            </div>
+            {currentData.linked_lists !== undefined && (
+                <div className="unit-perf-info">Analysed {currentData.linked_lists || 0} linked lists out of {currentData.total_lists || 0} total</div>
+            )}
+            <div className="unit-perf-bars">
+                {top15.map(function(u, i) {
+                    var metric, maxVal, label, colorClass;
+                    if (viewMode === 'overrepresentation') {
+                        metric = u.overrepresentation || 0;
+                        maxVal = top15[0] ? (top15[0].overrepresentation || 1) : 1;
+                        label = metric.toFixed(2) + 'x';
+                        colorClass = metric > 1.5 ? 'or-hot' : metric < 0.7 ? 'or-cold' : 'or-neutral';
+                    } else {
+                        metric = u.efficiency_score || 0;
+                        maxVal = top15[0] ? (top15[0].efficiency_score || 1) : 1;
+                        label = metric.toFixed(2);
+                        colorClass = metric > 1.2 ? 'or-hot' : metric < 0.8 ? 'or-cold' : 'or-neutral';
+                    }
+                    var pct = maxVal > 0 ? (metric / maxVal * 100) : 0;
+                    return (
+                        <div key={i} className="unit-perf-row">
+                            <div className="unit-perf-name">
+                                <span className="unit-perf-unit-name">{u.unit_name || u.name}</span>
+                                {u.faction && <span className="unit-perf-faction"><FactionIcon name={u.faction} />{u.faction}</span>}
+                            </div>
+                            <div className="unit-perf-bar-wrap">
+                                <div className={'unit-perf-bar-fill ' + colorClass} style={{ width: pct + '%' }}></div>
+                                <span className="unit-perf-bar-label">{label}</span>
+                            </div>
+                            <div className="unit-perf-stats">
+                                {u.appearances && <span>{u.appearances} lists</span>}
+                                {u.avg_win_rate_when_present !== undefined && <span>{u.avg_win_rate_when_present.toFixed(0)}% WR</span>}
+                                {u.avg_points && <span>{u.avg_points}pts</span>}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+// ── Matchups Matrix ─────────────────────────────────────────────
+
+function MatchupsMatrix(props) {
+    var ref1 = React.useState(null); var data = ref1[0]; var setData = ref1[1];
+    var ref2 = React.useState(true); var loading = ref2[0]; var setLoading = ref2[1];
+
+    React.useEffect(function() {
+        setLoading(true);
+        Api.getMatchups().then(function(d) {
+            setData(d);
+            setLoading(false);
+        }).catch(function() { setLoading(false); });
+    }, []);
+
+    if (loading) return <div className="loading"><div className="spinner"></div>Loading matchup data...</div>;
+    if (!data || !data.matchups || data.matchups.length === 0) {
+        return <div className="cal-no-events">No pairings data yet. Run fetch-pairings to backfill game results, or wait for the next sync.</div>;
+    }
+
+    var factions = data.factions || [];
+
+    // Build lookup: matchups[f1][f2] = { faction1_win_rate, faction1_wins, faction2_wins, draws, total_games }
+    var lookup = {};
+    factions.forEach(function(f) { lookup[f] = {}; });
+    data.matchups.forEach(function(m) {
+        lookup[m.faction1] = lookup[m.faction1] || {};
+        lookup[m.faction1][m.faction2] = m;
+        lookup[m.faction2] = lookup[m.faction2] || {};
+        lookup[m.faction2][m.faction1] = {
+            faction1_win_rate: 100 - m.faction1_win_rate,
+            faction1_wins: m.faction2_wins,
+            faction2_wins: m.faction1_wins,
+            draws: m.draws,
+            total_games: m.total_games
+        };
+    });
+
+    return (
+        <div className="matchups-panel">
+            <div className="matchup-grid" style={{ gridTemplateColumns: '160px ' + factions.map(function() { return '48px'; }).join(' ') }}>
+                <div className="matchup-corner"></div>
+                {factions.map(function(f) {
+                    return (
+                        <div key={f} className="matchup-col-header" title={f}>
+                            <FactionIcon name={f} size={18} />
+                            <span className="matchup-col-name">{f}</span>
+                        </div>
+                    );
+                })}
+                {factions.map(function(rowF) {
+                    return React.createElement(React.Fragment, { key: rowF },
+                        React.createElement('div', { className: 'matchup-row-header' },
+                            React.createElement(FactionIcon, { name: rowF, size: 18 }),
+                            React.createElement('span', { className: 'matchup-row-name' }, rowF)
+                        ),
+                        factions.map(function(colF) {
+                            if (rowF === colF) {
+                                return <div key={colF} className="matchup-cell matchup-self">-</div>;
+                            }
+                            var m = lookup[rowF] && lookup[rowF][colF];
+                            if (!m || !m.total_games) {
+                                return <div key={colF} className="matchup-cell matchup-empty">-</div>;
+                            }
+                            var wr = m.faction1_win_rate;
+                            var bg;
+                            if (wr > 55) bg = 'hsla(120, 50%, 35%, ' + Math.min((wr - 50) / 50 * 0.7, 0.7) + ')';
+                            else if (wr < 45) bg = 'hsla(0, 50%, 35%, ' + Math.min((50 - wr) / 50 * 0.7, 0.7) + ')';
+                            else bg = 'hsla(60, 20%, 30%, 0.3)';
+                            return (
+                                <div key={colF} className="matchup-cell" style={{ background: bg }}
+                                     title={rowF + ' vs ' + colF + ': ' + m.faction1_wins + 'W-' + m.faction2_wins + 'L-' + m.draws + 'D (' + m.total_games + ' games)'}>
+                                    <span className="matchup-wr">{m.faction1_wins + '-' + m.faction2_wins}</span>
+                                </div>
+                            );
+                        })
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+// ── Archetypes Panel ────────────────────────────────────────────
+
+function ArchetypesPanel(props) {
+    var ref1 = React.useState(null); var data = ref1[0]; var setData = ref1[1];
+    var ref2 = React.useState(true); var loading = ref2[0]; var setLoading = ref2[1];
+    var ref3 = React.useState(''); var factionFilter = ref3[0]; var setFactionFilter = ref3[1];
+    var ref4 = React.useState(null); var factions = ref4[0]; var setFactions = ref4[1];
+    var ref5 = React.useState(null); var expandedIdx = ref5[0]; var setExpandedIdx = ref5[1];
+
+    // Load faction list from faction stats
+    React.useEffect(function() {
+        Api.getFactionStats().then(function(data) {
+            if (data && data.factions) {
+                var names = data.factions.map(function(f) { return f.faction; }).sort();
+                setFactions(names);
+                if (names.length > 0) setFactionFilter(names[0]);
+            }
+        }).catch(function() {});
+    }, []);
+
+    React.useEffect(function() {
+        if (!factionFilter) return;
+        setLoading(true);
+        setExpandedIdx(null);
+        Api.getArchetypes(null, factionFilter).then(function(d) {
+            setData(d);
+            setLoading(false);
+        }).catch(function() { setLoading(false); });
+    }, [factionFilter]);
+
+    if (!factions) return <div className="loading"><div className="spinner"></div>Loading...</div>;
+
+    return (
+        <div className="archetypes-panel">
+            <div className="detachment-filter-row">
+                <select value={factionFilter} onChange={function(e) { setFactionFilter(e.target.value); }} className="detachment-filter-select">
+                    {factions.map(function(f) { return <option key={f} value={f}>{f}</option>; })}
+                </select>
+            </div>
+            {loading && <div className="loading"><div className="spinner"></div>Loading archetypes...</div>}
+            {!loading && data && data.archetypes && data.archetypes.length > 0 && (
+                <div className="archetype-cards">
+                    {data.archetypes.map(function(a, i) {
+                        var wrPct = a.avg_win_rate != null ? a.avg_win_rate.toFixed(1) : 'N/A';
+                        var wrClass = a.avg_win_rate > 55 ? 'wr-hot' : a.avg_win_rate < 45 ? 'wr-cold' : 'wr-neutral';
+                        var isExpanded = expandedIdx === i;
+                        return (
+                            <div key={i} className={'archetype-card' + (isExpanded ? ' archetype-card-expanded' : '')}
+                                 onClick={function() { setExpandedIdx(isExpanded ? null : i); }}>
+                                <div className="archetype-header">
+                                    <div className="archetype-header-left">
+                                        <span className="archetype-toggle">{isExpanded ? '\u25BE' : '\u25B8'}</span>
+                                        <span className="archetype-name">{a.name}</span>
+                                    </div>
+                                    <span className="archetype-detachment">{a.detachment || 'Unknown Detachment'}</span>
+                                </div>
+                                <div className="archetype-summary">
+                                    <div className="archetype-tags">
+                                        {a.defining_units.map(function(u) {
+                                            return <span key={u} className="archetype-tag">{u}</span>;
+                                        })}
+                                    </div>
+                                    <div className="archetype-stats">
+                                        <span className="archetype-stat">{a.list_count} lists</span>
+                                        <span className="archetype-stat">Avg Rank: {a.avg_rank ? a.avg_rank.toFixed(1) : 'N/A'}</span>
+                                        <span className={'archetype-stat ' + wrClass}>WR: {wrPct}%</span>
+                                    </div>
+                                </div>
+                                {isExpanded && a.sample_lists && a.sample_lists.length > 0 && (
+                                    <div className="archetype-lists" onClick={function(e) { e.stopPropagation(); }}>
+                                        {a.sample_lists.map(function(entry, j) {
+                                            return (
+                                                <div key={j} className="archetype-list-entry">
+                                                    <div className="archetype-list-header">
+                                                        {entry.rank > 0 && <span className="archetype-rank-badge">#{entry.rank}</span>}
+                                                        <span className="archetype-list-player">{entry.player_name}</span>
+                                                        <span className="archetype-list-points">{entry.total_points}pts</span>
+                                                    </div>
+                                                    <div className="archetype-list-units">
+                                                        {entry.units.map(function(u, k) {
+                                                            return (
+                                                                <span key={k} className="archetype-unit-chip">
+                                                                    {u.name}
+                                                                    {u.count > 1 ? ' \u00D7' + u.count : ''}
+                                                                    {u.points ? ' (' + u.points + ')' : ''}
+                                                                </span>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+            {!loading && (!data || !data.archetypes || data.archetypes.length === 0) && (
+                <div className="cal-no-events">No archetype data for {factionFilter}. Ensure army lists are linked to placements.</div>
+            )}
+            {data && data.total_lists !== undefined && (
+                <div className="unit-perf-info">{data.total_lists} lists analysed for {data.faction}</div>
+            )}
+        </div>
+    );
+}
+
 function AnalyticsPage(props) {
     var onSelectFaction = props.onSelectFaction;
     var onSelectEvent = props.onSelectEvent;
@@ -1559,6 +3602,7 @@ function AnalyticsPage(props) {
     var ref4 = React.useState(null); var players = ref4[0]; var setPlayers = ref4[1];
     var ref5 = React.useState(true); var loading = ref5[0]; var setLoading = ref5[1];
     var ref6 = React.useState(null); var unitsData = ref6[0]; var setUnitsData = ref6[1];
+    var refCS = React.useState(null); var compositeData = refCS[0]; var setCompositeData = refCS[1];
 
     React.useEffect(function() {
         setLoading(true);
@@ -1577,6 +3621,9 @@ function AnalyticsPage(props) {
             console.error('Analytics load error:', err);
             setLoading(false);
         });
+        Api.getCompositeScores().then(function(cs) {
+            setCompositeData(cs);
+        }).catch(function() {});
     }, []);
 
     if (loading) {
@@ -1589,22 +3636,90 @@ function AnalyticsPage(props) {
 
             <div className="chart-tabs" style={{ marginTop: '16px' }}>
                 <button className={'chart-tab' + (subTab === 'trends' ? ' active' : '')} onClick={function() { setSubTab('trends'); }}>Meta Trends</button>
-                <button className={'chart-tab' + (subTab === 'winrates' ? ' active' : '')} onClick={function() { setSubTab('winrates'); }}>Win Rates</button>
+                <button className={'chart-tab' + (subTab === 'winrates' ? ' active' : '')} onClick={function() { setSubTab('winrates'); }}>1st Place %</button>
                 <button className={'chart-tab' + (subTab === 'units' ? ' active' : '')} onClick={function() { setSubTab('units'); }}>Top Units</button>
                 <button className={'chart-tab' + (subTab === 'players' ? ' active' : '')} onClick={function() { setSubTab('players'); }}>Top Players</button>
+                <button className={'chart-tab' + (subTab === 'detachments' ? ' active' : '')} onClick={function() { setSubTab('detachments'); }}>Detachments</button>
+                <button className={'chart-tab' + (subTab === 'unitwr' ? ' active' : '')} onClick={function() { setSubTab('unitwr'); }}>Unit WR</button>
+                <button className={'chart-tab' + (subTab === 'matchups' ? ' active' : '')} onClick={function() { setSubTab('matchups'); }}>Matchups</button>
+                <button className={'chart-tab' + (subTab === 'archetypes' ? ' active' : '')} onClick={function() { setSubTab('archetypes'); }}>Archetypes</button>
+                <button className={'chart-tab' + (subTab === 'threat' ? ' active' : '')} onClick={function() { setSubTab('threat'); }}>Meta Threat</button>
+                <button className={'chart-tab' + (subTab === 'podiums' ? ' active' : '')} onClick={function() { setSubTab('podiums'); }}>Exp. Podiums</button>
+                <button className={'chart-tab' + (subTab === 'baldev' ? ' active' : '')} onClick={function() { setSubTab('baldev'); }}>Balance Dev</button>
+                <button className={'chart-tab' + (subTab === 'power' ? ' active' : '')} onClick={function() { setSubTab('power'); }}>Power Index</button>
             </div>
 
             {subTab === 'trends' && (
-                <FactionTrendsChart trends={trends} metric="meta_share" label="Meta Share %" onSelectFaction={onSelectFaction} />
+                <div>
+                    <p className="analytics-desc">How each faction's meta share has changed across balance dataslates. Lines show the percentage of tracked top finishers playing each faction per epoch.</p>
+                    <FactionTrendsChart trends={trends} metric="meta_share" label="Meta Share %" onSelectFaction={onSelectFaction} />
+                </div>
             )}
             {subTab === 'winrates' && (
-                <FactionTrendsChart trends={trends} metric="win_rate" label="Win Rate %" onSelectFaction={onSelectFaction} />
+                <div>
+                    <p className="analytics-desc">First-place finish rate over time. Shows what percentage of a faction's appearances resulted in a tournament win, tracked across epochs.</p>
+                    <FactionTrendsChart trends={trends} metric="win_rate" label="1st Place %" onSelectFaction={onSelectFaction} />
+                </div>
             )}
             {subTab === 'units' && (
-                <TopUnitsChart data={unitsData} onSelectFaction={onSelectFaction} />
+                <div>
+                    <p className="analytics-desc">The most frequently included non-character units across tracked army lists. Higher count means a unit appears in more lists.</p>
+                    <TopUnitsChart data={unitsData} onSelectFaction={onSelectFaction} />
+                </div>
             )}
             {subTab === 'players' && (
-                <TopPlayersTable players={players ? players.players : null} onSelectEvent={onSelectEvent} />
+                <div>
+                    <p className="analytics-desc">Players ranked by tournament wins, showing their primary faction and average finishing position. Minimum 2 events to qualify.</p>
+                    <TopPlayersTable players={players ? players.players : null} onSelectEvent={onSelectEvent} />
+                </div>
+            )}
+            {subTab === 'detachments' && (
+                <div>
+                    <p className="analytics-desc">Win rates and top-4 finishes by faction and detachment choice. Select a faction to see which detachments perform best.</p>
+                    <DetachmentStatsPanel />
+                </div>
+            )}
+            {subTab === 'unitwr' && (
+                <div>
+                    <p className="analytics-desc">How individual units correlate with list performance. Over-representation shows units that appear more in winning lists; efficiency factors in points cost.</p>
+                    <UnitPerformancePanel />
+                </div>
+            )}
+            {subTab === 'matchups' && (
+                <div>
+                    <p className="analytics-desc">Head-to-head records from game-level pairings data. Each cell shows wins-losses for the row faction against the column faction. Green = favourable, red = unfavourable. Hover for full record including draws.</p>
+                    <MatchupsMatrix />
+                </div>
+            )}
+            {subTab === 'archetypes' && (
+                <div>
+                    <p className="analytics-desc">Common list archetypes within a faction, grouped by detachment and defining unit choices. Shows how many lists use each archetype and their average performance.</p>
+                    <ArchetypesPanel />
+                </div>
+            )}
+            {subTab === 'threat' && (
+                <div>
+                    <p className="analytics-desc">Meta Threat = Adjusted Win Rate x sqrt(Meta Share). Combines win strength with popularity. High threat factions are both strong and widely played.</p>
+                    <CompositeChart data={compositeData} metric="meta_threat" label="Meta Threat" onSelectFaction={onSelectFaction} description="Meta Threat = Adjusted Win Rate x sqrt(Meta Share). Combines win strength with popularity. High threat factions are both strong and widely played." />
+                </div>
+            )}
+            {subTab === 'podiums' && (
+                <div>
+                    <p className="analytics-desc">Expected Podiums = Meta Share x Top 4 Rate / 100. Estimates how many podium finishes to expect given a faction's popularity and top-4 conversion rate.</p>
+                    <CompositeChart data={compositeData} metric="expected_podiums" label="Expected Podiums" onSelectFaction={onSelectFaction} description="Expected Podiums = Meta Share x Top 4 Rate / 100. Estimates how many podium finishes to expect given a faction's popularity and top-4 conversion rate." />
+                </div>
+            )}
+            {subTab === 'baldev' && (
+                <div>
+                    <p className="analytics-desc">Balance Deviation = (Adjusted WR - 50%) x sqrt(Meta Share). Positive = overperforming, negative = underperforming. Weighted by popularity so common factions have stronger signal.</p>
+                    <CompositeChart data={compositeData} metric="balance_deviation" label="Balance Deviation" onSelectFaction={onSelectFaction} description="Balance Deviation = (Adjusted WR - 50%) x sqrt(Meta Share). Positive = overperforming, negative = underperforming. Weighted by popularity so common factions have stronger signal." />
+                </div>
+            )}
+            {subTab === 'power' && (
+                <div>
+                    <p className="analytics-desc">Power Index = average percentile rank across Win Rate, Meta Share, Top 4 Rate, and 1st Place Rate (0-100). A holistic ranking that considers all dimensions of faction strength.</p>
+                    <CompositeChart data={compositeData} metric="power_index" label="Power Index" onSelectFaction={onSelectFaction} description="Power Index = average percentile rank across Win Rate, Meta Share, Top 4 Rate, and 1st Place Rate (0-100). A holistic ranking that considers all dimensions of faction strength." />
+                </div>
             )}
         </div>
     );
@@ -1619,6 +3734,39 @@ function dateToDays(dateStr) {
 function daysToDate(days) {
     var d = new Date(days * 86400000);
     return d.toISOString().slice(0, 10);
+}
+
+function PlayerSlider(props) {
+    var min = props.min;
+    var max = props.max;
+    var fromVal = props.fromVal;
+    var toVal = props.toVal;
+    var onChange = props.onChange;
+
+    return (
+        <div className="time-slider">
+            <div className="time-slider-labels">
+                <span>{fromVal} players</span>
+                <span>{toVal} players</span>
+            </div>
+            <div className="time-slider-tracks">
+                <input type="range" className="slider-from" min={min} max={max}
+                    value={fromVal}
+                    onChange={function(e) {
+                        var v = Number(e.target.value);
+                        if (v <= toVal) onChange(v, toVal);
+                    }}
+                />
+                <input type="range" className="slider-to" min={min} max={max}
+                    value={toVal}
+                    onChange={function(e) {
+                        var v = Number(e.target.value);
+                        if (v >= fromVal) onChange(fromVal, v);
+                    }}
+                />
+            </div>
+        </div>
+    );
 }
 
 function TimeSlider(props) {
@@ -1676,11 +3824,52 @@ function App() {
     var ref15 = React.useState([]); var calendarEvents = ref15[0]; var setCalendarEvents = ref15[1];
     var ref16 = React.useState([]); var balancePasses = ref16[0]; var setBalancePasses = ref16[1];
     var ref17 = React.useState(null); var selectedBalancePass = ref17[0]; var setSelectedBalancePass = ref17[1];
+    var ref18 = React.useState(false); var showRefresh = ref18[0]; var setShowRefresh = ref18[1];
+    var ref19 = React.useState(false); var showTraffic = ref19[0]; var setShowTraffic = ref19[1];
+    var refSQ = React.useState(''); var searchQuery = refSQ[0]; var setSearchQuery = refSQ[1];
+    var refMP = React.useState(null); var minPlayers = refMP[0]; var setMinPlayers = refMP[1];
+    var refXP = React.useState(null); var maxPlayers = refXP[0]; var setMaxPlayers = refXP[1];
+    var refPMin = React.useState(0); var playerBoundMin = refPMin[0]; var setPlayerBoundMin = refPMin[1];
+    var refPMax = React.useState(200); var playerBoundMax = refPMax[0]; var setPlayerBoundMax = refPMax[1];
+    var playerDebounceRef = React.useRef(null);
+    var refWR = React.useState(null); var winRateData = refWR[0]; var setWinRateData = refWR[1];
+    var refCS = React.useState(null); var compositeData = refCS[0]; var setCompositeData = refCS[1];
+    var ref19 = React.useState(function() {
+        try { return localStorage.getItem('theme') || 'dark'; } catch(e) { return 'dark'; }
+    }); var theme = ref19[0]; var setTheme = ref19[1];
 
-    function loadData(epoch, from, to) {
+    React.useEffect(function() {
+        document.documentElement.setAttribute('data-theme', theme);
+        try { localStorage.setItem('theme', theme); } catch(e) {}
+    }, [theme]);
+
+    var themeOrder = ['dark', 'dim', 'light', 'lcars', 'tron'];
+    var themeIcons = { dark: '\u2600', dim: '\u25D1', light: '\u263D', lcars: '\u2726', tron: '\u26A1' };
+    var themeTitles = { dark: 'Switch to dim', dim: 'Switch to light', light: 'Switch to LCARS', lcars: 'Switch to tron', tron: 'Switch to dark' };
+    function toggleTheme() {
+        setTheme(function(t) { var i = themeOrder.indexOf(t); return themeOrder[(i + 1) % themeOrder.length]; });
+    }
+
+    // Check if any past events (more than 3 days old) are missing data
+    var hasMissingData = React.useMemo(function() {
+        var cutoff = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+        return calendarEvents.some(function(ev) {
+            return ev.date && ev.date < cutoff && !ev.completed;
+        });
+    }, [calendarEvents]);
+
+    function loadData(epoch, from, to, mpMin, mpMax) {
+        var mn = mpMin != null ? mpMin : minPlayers;
+        var mx = mpMax != null ? mpMax : maxPlayers;
+        Api.getWinRates(epoch, from, to, null, null).then(function(wr) {
+            setWinRateData(wr);
+        }).catch(function() {});
+        Api.getCompositeScores(epoch, from, to).then(function(cs) {
+            setCompositeData(cs);
+        }).catch(function() {});
         return Promise.all([
             Api.getFactionStats(epoch, from, to),
-            Api.getEvents(1, 20, epoch, from, to, true),
+            Api.getEvents(1, 20, epoch, from, to, true, null, mn, mx),
         ]).then(function(results) {
             setFactions(results[0].factions);
             setEvents(results[1].events);
@@ -1708,17 +3897,27 @@ function App() {
         Api.getEpochs().then(function(epochData) {
             var epochList = epochData.epochs;
             setEpochs(epochList);
-            // Default to the most recent epoch with data; fall back to current
-            var current = epochList.find(function(e) { return e.is_current; });
-            var defaultEpoch = current;
-            if (current && current.event_count === 0) {
-                var withData = epochList.filter(function(e) { return e.event_count > 0; });
-                if (withData.length > 0) {
-                    defaultEpoch = withData[withData.length - 1];
+            // Pick the most recent epoch that has placement results.
+            // Walk from newest to oldest; stop at the first with placements.
+            var defaultEpoch = null;
+            for (var i = epochList.length - 1; i >= 0; i--) {
+                if ((epochList[i].placement_count || 0) > 0) {
+                    defaultEpoch = epochList[i];
+                    break;
                 }
+            }
+            if (!defaultEpoch) {
+                defaultEpoch = epochList.find(function(e) { return e.is_current; }) || epochList[epochList.length - 1];
             }
             var epochId = defaultEpoch ? defaultEpoch.id : null;
             if (epochId) setActiveEpoch(epochId);
+
+            Api.getWinRates(epochId).then(function(wr) {
+                setWinRateData(wr);
+            }).catch(function() {});
+            Api.getCompositeScores(epochId).then(function(cs) {
+                setCompositeData(cs);
+            }).catch(function() {});
 
             return Promise.all([
                 Api.getFactionStats(epochId),
@@ -1744,8 +3943,18 @@ function App() {
                     setBalancePasses(bp.balance_passes || []);
                 }).catch(function(e) { console.warn('Balance passes not available:', e); });
 
-                Api.getEvents(1, 200, epochId).then(function(calData) {
-                    setCalendarEvents(calData.events || []);
+                Api.getEvents(1, 500, 'all').then(function(calData) {
+                    var evts = calData.events || [];
+                    setCalendarEvents(evts);
+                    var counts = evts.map(function(e) { return e.player_count || 0; }).filter(function(c) { return c > 0; });
+                    if (counts.length > 0) {
+                        var pMin = Math.min.apply(null, counts);
+                        var pMax = Math.max.apply(null, counts);
+                        setPlayerBoundMin(pMin);
+                        setPlayerBoundMax(pMax);
+                        setMinPlayers(pMin);
+                        setMaxPlayers(pMax);
+                    }
                 }).catch(function(e) { console.warn('Calendar events not available:', e); });
             });
         }).catch(function(err) {
@@ -1763,10 +3972,12 @@ function App() {
         setDateTo(null);
         setDateMin(null);
         setDateMax(null);
-        loadData(epochId).catch(function(err) {
+        setMinPlayers(playerBoundMin);
+        setMaxPlayers(playerBoundMax);
+        loadData(epochId, null, null, null, null).catch(function(err) {
             console.error('Failed to load epoch data:', err);
         });
-        Api.getEvents(1, 200, epochId).then(function(calData) {
+        Api.getEvents(1, 500, 'all').then(function(calData) {
             setCalendarEvents(calData.events || []);
         }).catch(function(e) { console.warn('Calendar events reload failed:', e); });
     }
@@ -1779,7 +3990,7 @@ function App() {
         debounceRef.current = setTimeout(function() {
             Promise.all([
                 Api.getFactionStats(activeEpoch, from, to),
-                Api.getEvents(1, 20, activeEpoch, from, to, true),
+                Api.getEvents(1, 20, activeEpoch, from, to, true, null, minPlayers, maxPlayers),
             ]).then(function(results) {
                 setFactions(results[0].factions);
                 setEvents(results[1].events);
@@ -1789,10 +4000,57 @@ function App() {
     }
 
     function handlePageChange(newPage) {
-        Api.getEvents(newPage, 20, activeEpoch, dateFrom, dateTo, true).then(function(data) {
-            setEvents(data.events);
-            setPagination(data.pagination);
-        });
+        if (searchQuery) {
+            Api.getEvents(newPage, 20, 'all', null, null, false, searchQuery, minPlayers, maxPlayers).then(function(data) {
+                setEvents(data.events);
+                setPagination(data.pagination);
+            });
+        } else {
+            Api.getEvents(newPage, 20, activeEpoch, dateFrom, dateTo, true, null, minPlayers, maxPlayers).then(function(data) {
+                setEvents(data.events);
+                setPagination(data.pagination);
+            });
+        }
+    }
+
+    function handleSearch(q) {
+        setSearchQuery(q);
+        // When searching, look across all epochs and don't require results
+        // so the user can find any tournament. When clearing, revert to normal view.
+        if (q) {
+            Api.getEvents(1, 20, 'all', null, null, false, q, minPlayers, maxPlayers).then(function(data) {
+                setEvents(data.events);
+                setPagination(data.pagination);
+            });
+        } else {
+            Api.getEvents(1, 20, activeEpoch, dateFrom, dateTo, true, null, minPlayers, maxPlayers).then(function(data) {
+                setEvents(data.events);
+                setPagination(data.pagination);
+            });
+        }
+    }
+
+    function handlePlayerFilter(newMin, newMax) {
+        setMinPlayers(newMin);
+        setMaxPlayers(newMax);
+        if (playerDebounceRef.current) clearTimeout(playerDebounceRef.current);
+        var epoch = activeEpoch;
+        var df = dateFrom;
+        var dt = dateTo;
+        var sq = searchQuery;
+        playerDebounceRef.current = setTimeout(function() {
+            if (sq) {
+                Api.getEvents(1, 20, 'all', null, null, false, sq, newMin, newMax).then(function(data) {
+                    setEvents(data.events);
+                    setPagination(data.pagination);
+                });
+            } else {
+                Api.getEvents(1, 20, epoch, df, dt, true, null, newMin, newMax).then(function(data) {
+                    setEvents(data.events);
+                    setPagination(data.pagination);
+                });
+            }
+        }, 250);
     }
 
     function handleSelectEvent(id) {
@@ -1817,6 +4075,20 @@ function App() {
         setSelectedEvent(null);
         setSelectedFaction(null);
         setSelectedBalancePass(null);
+    }
+
+    function handleRefreshComplete() {
+        // Reload all data after a successful refresh
+        Api.getEvents(1, 500, 'all').then(function(calData) {
+            setCalendarEvents(calData.events || []);
+        }).catch(function() {});
+        Api.getBalancePasses().then(function(bp) {
+            setBalancePasses(bp.balance_passes || []);
+        }).catch(function() {});
+        Api.getEpochs().then(function(epochData) {
+            setEpochs(epochData.epochs);
+        }).catch(function() {});
+        loadData(activeEpoch, dateFrom, dateTo).catch(function() {});
     }
 
     if (loading) {
@@ -1847,7 +4119,7 @@ function App() {
                     <button className={'main-tab' + (mainTab === 'analytics' ? ' active' : '')} onClick={function() { setMainTab('analytics'); }}>Analytics</button>
                 </div>
                 {mainTab === 'tournaments' && (
-                    <EventList events={events} pagination={pagination} onPageChange={handlePageChange} onSelectEvent={handleSelectEvent} />
+                    <EventList events={events} pagination={pagination} onPageChange={handlePageChange} onSelectEvent={handleSelectEvent} onSearch={handleSearch} searchQuery={searchQuery} />
                 )}
                 {mainTab === 'calendar' && (
                     <CalendarView allEvents={calendarEvents} balancePasses={balancePasses} onSelectEvent={handleSelectEvent} onSelectBalancePass={handleSelectBalancePass} />
@@ -1862,7 +4134,14 @@ function App() {
         );
     }
 
-    var CHEVRON_COLORS = ['#3b7dd8','#4a9a6e','#d4883e','#c75454','#8b6fb0','#4aafaf','#c9a84c','#5a8f7a'];
+    var CHEVRON_PALETTES = {
+        dark:  ['#3b7dd8','#4a9a6e','#d4883e','#c75454','#8b6fb0','#4aafaf','#c9a84c','#5a8f7a'],
+        dim:   ['#4a8ae0','#55a87a','#e09848','#d06060','#9a80c0','#55baba','#d4b45c','#6aa08a'],
+        light: ['#2e6ab8','#2e8a5a','#c07828','#b83e3e','#7050a0','#3a9a9a','#9e7a20','#4a7a6a'],
+        lcars: ['#cc99cc','#ff9966','#9999cc','#ffcc99','#cc99ff','#ff9900','#9999ff','#cc6699'],
+        tron:  ['#00e5ff','#00e5ff','#00e5ff','#00e5ff','#00e5ff','#00e5ff','#00e5ff','#00e5ff'],
+    };
+    var CHEVRON_COLORS = CHEVRON_PALETTES[theme] || CHEVRON_PALETTES.dark;
 
     return (
         <div>
@@ -1887,14 +4166,28 @@ function App() {
                                 onClick={function() { handleEpochChange(epoch.id); }}>
                                 <span className="chevron-label">{epoch.label}</span>
                                 <span className="chevron-meta">{epoch.event_count} events</span>
-                                {epoch.balance_pass_id && (
-                                    <span className="chevron-bp-btn" title="View balance pass details" onClick={function(e) { e.stopPropagation(); handleSelectBalancePass(epoch.balance_pass_id); }}>{'\u25c6'} Changes</span>
-                                )}
                             </div>
                         );
                     })}
                 </div>
+                {(function() {
+                    var ep = epochs.find(function(e) { return e.id === activeEpoch; });
+                    return ep && ep.balance_pass_id ? (
+                        <button className="header-bp-btn" title="View balance dataslate" onClick={function() { handleSelectBalancePass(ep.balance_pass_id); }}>
+                            <svg className="bp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M8 21h8"/><path d="M3 7h7"/><path d="M14 7h7"/><path d="M3 7l1.5 6h4L10 7"/><path d="M14 7l1.5 6h4L21 7"/></svg>
+                        </button>
+                    ) : null;
+                })()}
+                {window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? (
+                    <button className={'refresh-btn header-refresh' + (hasMissingData ? ' has-missing' : '')} onClick={function() { setShowRefresh(true); }}>{'\u21bb'} Refresh</button>
+                ) : null}
+                {window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? (
+                    <button className="refresh-btn header-refresh" onClick={function() { setShowTraffic(true); }}>{'\u2139'} Traffic</button>
+                ) : null}
+                <button className="theme-toggle" onClick={toggleTheme} title={themeTitles[theme]}>{themeIcons[theme]}</button>
             </div>
+            {showRefresh && <RefreshDialog allEvents={calendarEvents} onClose={function(didComplete) { setShowRefresh(false); if (didComplete) handleRefreshComplete(); }} />}
+            {showTraffic && <TrafficPopup onClose={function() { setShowTraffic(false); }} />}
             <div className="layout">
                 <div className="sidebar">
                     {dateMin && dateMax && (
@@ -1903,8 +4196,14 @@ function App() {
                             <TimeSlider minDate={dateMin} maxDate={dateMax} fromDate={dateFrom} toDate={dateTo} onChange={handleDateRangeChange} />
                         </div>
                     )}
+                    {minPlayers != null && maxPlayers != null && playerBoundMax > playerBoundMin && (
+                        <div className="sidebar-slider">
+                            <div className="sidebar-slider-label">Player Count</div>
+                            <PlayerSlider min={playerBoundMin} max={playerBoundMax} fromVal={minPlayers} toVal={maxPlayers} onChange={handlePlayerFilter} />
+                        </div>
+                    )}
                     <AllegianceFilter active={allegianceFilter} onChange={setAllegianceFilter} />
-                    <SidebarCharts factions={allegianceFilter === 'All' ? factions : (factions || []).filter(function(f) { return f.allegiance === allegianceFilter; })} onSelectFaction={handleSelectFaction} />
+                    <SidebarCharts factions={allegianceFilter === 'All' ? factions : (factions || []).filter(function(f) { return f.allegiance === allegianceFilter; })} winRateData={winRateData} compositeData={compositeData} onSelectFaction={handleSelectFaction} />
                     <h2 className="section-heading" style={{marginTop: '8px'}}>Factions</h2>
                     <FactionCards factions={factions} onSelectFaction={handleSelectFaction} allegianceFilter={allegianceFilter} />
                 </div>

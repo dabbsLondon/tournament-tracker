@@ -90,7 +90,7 @@ enum Commands {
         host: String,
 
         /// Port number
-        #[arg(long, default_value = "8080")]
+        #[arg(long, default_value = "3000")]
         port: u16,
 
         /// Log all HTTP requests
@@ -223,6 +223,28 @@ enum Commands {
         dry_run: bool,
     },
 
+    /// Fetch pairings from BCP for existing events (retroactive backfill)
+    FetchPairings {
+        /// Epoch to process (default: current)
+        #[arg(long)]
+        epoch: Option<String>,
+
+        /// Dry run — don't write changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Link army lists to placements by player name (retroactive fix)
+    LinkLists {
+        /// Epoch to process (default: current)
+        #[arg(long)]
+        epoch: Option<String>,
+
+        /// Show what would change without writing
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Repartition data by epoch
     Repartition {
         /// Show what would happen without writing
@@ -283,6 +305,25 @@ enum DebugAction {
         epoch: Option<String>,
     },
 
+    /// Check detachment consistency between placements and army lists
+    CheckDetachments {
+        /// Epoch to check (default: current)
+        #[arg(long)]
+        epoch: Option<String>,
+    },
+
+    /// Re-parse army list units from raw_text using the regex parser
+    /// to update keywords and wargear fields
+    ReparseUnits {
+        /// Epoch to check (default: current)
+        #[arg(long)]
+        epoch: Option<String>,
+
+        /// Dry run — don't write changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Test ingestion from a fixture file
     TestIngest {
         /// Path to HTML fixture
@@ -336,14 +377,22 @@ async fn main() -> Result<()> {
 
             // Build source list
             let sources = match source.as_deref() {
-                Some("goonhammer") | None => vec![SyncSource::default()],
+                Some("goonhammer") => vec![SyncSource::Goonhammer {
+                    base_url: "https://www.goonhammer.com/tag/competitive-innovations-in-10th/"
+                        .to_string(),
+                }],
+                Some("bcp") => vec![SyncSource::Bcp {
+                    api_base_url: "https://newprod-api.bestcoastpairings.com/v1".to_string(),
+                    game_type: 1,
+                }],
                 Some("warhammer-community") => vec![SyncSource::WarhammerCommunity {
                     url: "https://www.warhammer-community.com/en-gb/downloads/warhammer-40000/"
                         .to_string(),
                 }],
+                None => vec![SyncSource::default()],
                 Some(other) => {
                     eprintln!(
-                        "Unknown source: {}. Use 'goonhammer' or 'warhammer-community'.",
+                        "Unknown source: {}. Use 'goonhammer', 'bcp', or 'warhammer-community'.",
                         other
                     );
                     return Ok(());
@@ -453,15 +502,27 @@ async fn main() -> Result<()> {
                 }
                 _ => EpochMapper::new(),
             };
+            let backend: Arc<dyn AiBackend> = select_backend();
             let state = meta_agent::api::state::AppState {
                 storage: Arc::new(storage),
-                epoch_mapper: Arc::new(epoch_mapper),
+                epoch_mapper: Arc::new(tokio::sync::RwLock::new(epoch_mapper)),
+                refresh_state: Arc::new(tokio::sync::RwLock::new(
+                    meta_agent::api::routes::refresh::RefreshState::default(),
+                )),
+                ai_backend: backend,
+                traffic_stats: std::sync::Arc::new(tokio::sync::RwLock::new(
+                    meta_agent::api::routes::traffic::TrafficStats::new(),
+                )),
             };
             let app = meta_agent::api::build_router(state);
             let addr = format!("{}:{}", host, port);
             let listener = tokio::net::TcpListener::bind(&addr).await?;
             tracing::info!("Dashboard: http://{}", addr);
-            axum::serve(listener, app).await?;
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await?;
         }
         Commands::BuildParquet { .. } => {
             tracing::info!("Rebuilding Parquet files...");
@@ -848,6 +909,384 @@ async fn main() -> Result<()> {
                     if pct < 50.0 {
                         println!("\nWARNING: List match rate below 50%!");
                         std::process::exit(1);
+                    }
+                }
+                DebugAction::CheckDetachments { epoch } => {
+                    use meta_agent::api::routes::events::{
+                        normalize_faction_name, parse_detachment_from_raw,
+                    };
+                    use meta_agent::sync::normalize_player_name;
+
+                    let storage = StorageConfig::new(std::path::PathBuf::from(&cli.data_dir));
+                    let sig_events = read_significant_events(&storage).unwrap_or_default();
+                    let mapper = EpochMapper::from_significant_events(&sig_events);
+                    let epoch_id = epoch
+                        .or_else(|| mapper.current_epoch().map(|e| e.id.as_str().to_string()))
+                        .unwrap_or_else(|| "current".to_string());
+
+                    let events: Vec<meta_agent::models::Event> =
+                        JsonlReader::for_entity(&storage, EntityType::Event, &epoch_id)
+                            .read_all()
+                            .unwrap_or_default();
+                    let events = dedup_by_id(events, |e| e.id.as_str());
+
+                    let placements: Vec<meta_agent::models::Placement> =
+                        JsonlReader::for_entity(&storage, EntityType::Placement, &epoch_id)
+                            .read_all()
+                            .unwrap_or_default();
+                    let placements = dedup_by_id(placements, |p| p.id.as_str());
+
+                    let lists: Vec<ArmyList> =
+                        JsonlReader::for_entity(&storage, EntityType::ArmyList, &epoch_id)
+                            .read_all()
+                            .unwrap_or_default();
+                    let lists = dedup_by_id(lists, |l| l.id.as_str());
+
+                    // Build name→lists map (one player can have lists from multiple events)
+                    let mut name_to_lists: std::collections::HashMap<String, Vec<&ArmyList>> =
+                        std::collections::HashMap::new();
+                    for l in &lists {
+                        if let Some(name) = &l.player_name {
+                            name_to_lists
+                                .entry(normalize_player_name(name))
+                                .or_default()
+                                .push(l);
+                        }
+                    }
+
+                    let event_names: std::collections::HashMap<&str, &str> = events
+                        .iter()
+                        .map(|e| (e.id.as_str(), e.name.as_str()))
+                        .collect();
+
+                    // Build event source_url map for matching
+                    let event_urls: std::collections::HashMap<&str, &str> = events
+                        .iter()
+                        .map(|e| (e.id.as_str(), e.source_url.as_str()))
+                        .collect();
+
+                    println!(
+                        "=== Detachment Consistency Check (epoch: {}) ===\n",
+                        epoch_id
+                    );
+
+                    let mut checked = 0u32;
+                    let mut mismatches = 0u32;
+                    let mut game_size_in_struct = 0u32;
+                    let mut unmapped_placements = 0u32;
+                    let mut unmapped_details: Vec<String> = Vec::new();
+
+                    for p in &placements {
+                        let norm_name = normalize_player_name(&p.player_name);
+                        let player_lists = match name_to_lists.get(&norm_name) {
+                            Some(l) => l,
+                            None => {
+                                if p.rank <= 4 {
+                                    unmapped_placements += 1;
+                                    let event_name =
+                                        event_names.get(p.event_id.as_str()).unwrap_or(&"?");
+                                    unmapped_details.push(format!(
+                                        "  #{} {} ({}, {}) — {}",
+                                        p.rank,
+                                        p.player_name,
+                                        p.faction,
+                                        p.detachment.as_deref().unwrap_or("-"),
+                                        event_name
+                                    ));
+                                }
+                                continue;
+                            }
+                        };
+
+                        // Find the best matching list for this placement:
+                        // 1. Same event_id (if list has one)
+                        // 2. Same source_url as the placement's event
+                        // 3. Same faction
+                        // 4. Fall back to first list
+                        let event_url = event_urls.get(p.event_id.as_str()).copied();
+                        let norm_faction = normalize_faction_name(&p.faction);
+
+                        // Priority: event_id match > source_url+faction > faction only
+                        // Skip entirely if list has an event_id that doesn't match (different event)
+                        let list = player_lists
+                            .iter()
+                            .find(|l| {
+                                l.event_id
+                                    .as_ref()
+                                    .is_some_and(|eid| eid.as_str() == p.event_id.as_str())
+                            })
+                            .or_else(|| {
+                                player_lists.iter().find(|l| {
+                                    // Only match if list has no event_id (unlinked) and shares source_url + faction
+                                    l.event_id.is_none()
+                                        && event_url
+                                            .is_some_and(|eu| l.source_url.as_deref() == Some(eu))
+                                        && normalize_faction_name(&l.faction) == norm_faction
+                                })
+                            })
+                            .or_else(|| {
+                                // Only match unlinked lists by faction
+                                player_lists.iter().find(|l| {
+                                    l.event_id.is_none()
+                                        && normalize_faction_name(&l.faction) == norm_faction
+                                })
+                            });
+
+                        let list = match list {
+                            Some(l) => l,
+                            None => continue, // No list for this event — skip
+                        };
+
+                        checked += 1;
+
+                        // Check 1: Army list structured detachment field should not be a game size
+                        if let Some(ref det) = list.detachment {
+                            let lower = det.to_lowercase();
+                            if ["strike force", "incursion", "onslaught", "combat patrol"]
+                                .iter()
+                                .any(|gs| lower.starts_with(gs))
+                            {
+                                game_size_in_struct += 1;
+                                let event_name =
+                                    event_names.get(p.event_id.as_str()).unwrap_or(&"?");
+                                let raw_det = parse_detachment_from_raw(&list.raw_text);
+                                println!(
+                                    "  GAME_SIZE_AS_DET: {} ({}) — list.detachment=\"{}\" raw_det={:?} — {}",
+                                    p.player_name, p.faction, det,
+                                    raw_det, event_name
+                                );
+                            }
+                        }
+
+                        // Check 2: Placement detachment vs raw_text detachment
+                        let placement_det = match &p.detachment {
+                            Some(d) if !d.is_empty() => d,
+                            _ => continue,
+                        };
+                        let raw_det = match parse_detachment_from_raw(&list.raw_text) {
+                            Some(d) => d,
+                            None => continue,
+                        };
+
+                        if !placement_det.eq_ignore_ascii_case(&raw_det) {
+                            mismatches += 1;
+                            let event_name = event_names.get(p.event_id.as_str()).unwrap_or(&"?");
+                            println!(
+                                "  MISMATCH: {} ({}) — placement=\"{}\" list_raw=\"{}\" — {}",
+                                p.player_name, p.faction, placement_det, raw_det, event_name
+                            );
+                        }
+                    }
+
+                    // Report unmapped lists (lists with no matching placement)
+                    let placement_names: std::collections::HashSet<String> = placements
+                        .iter()
+                        .map(|p| normalize_player_name(&p.player_name))
+                        .collect();
+                    let unmapped_lists: Vec<&ArmyList> = lists
+                        .iter()
+                        .filter(|l| {
+                            l.player_name.as_ref().is_none_or(|n| {
+                                !placement_names.contains(&normalize_player_name(n))
+                            })
+                        })
+                        .collect();
+
+                    println!("\nChecked: {} placement-list pairs", checked);
+                    println!("Detachment mismatches: {}", mismatches);
+                    println!("Game-size-as-detachment: {}", game_size_in_struct);
+
+                    if !unmapped_details.is_empty() {
+                        println!(
+                            "\nUnmapped top-4 placements (no matching list): {}",
+                            unmapped_placements
+                        );
+                        for d in &unmapped_details {
+                            println!("{}", d);
+                        }
+                    }
+
+                    if !unmapped_lists.is_empty() {
+                        println!(
+                            "\nUnmapped lists (no matching placement): {}",
+                            unmapped_lists.len()
+                        );
+                        for l in &unmapped_lists {
+                            println!(
+                                "  {} ({}) — {}",
+                                l.player_name.as_deref().unwrap_or("?"),
+                                l.faction,
+                                l.detachment.as_deref().unwrap_or("-")
+                            );
+                        }
+                    }
+
+                    if mismatches > 0 || game_size_in_struct > 0 {
+                        println!("\nWARNING: Detachment data quality issues found!");
+                        std::process::exit(1);
+                    } else {
+                        println!("\nAll detachments consistent.");
+                    }
+                }
+                DebugAction::ReparseUnits { epoch, dry_run } => {
+                    use meta_agent::sync::bcp::{
+                        detect_chapter_from_raw_text, parse_units_from_raw_text,
+                    };
+
+                    let storage = StorageConfig::new(std::path::PathBuf::from(&cli.data_dir));
+                    let sig_events = read_significant_events(&storage).unwrap_or_default();
+                    let mapper = EpochMapper::from_significant_events(&sig_events);
+                    let epoch_id = epoch
+                        .or_else(|| mapper.current_epoch().map(|e| e.id.as_str().to_string()))
+                        .unwrap_or_else(|| "current".to_string());
+
+                    let reader = JsonlReader::<ArmyList>::for_entity(
+                        &storage,
+                        EntityType::ArmyList,
+                        &epoch_id,
+                    );
+                    let mut lists = reader.read_all().expect("Failed to read army lists");
+                    lists = dedup_by_id(lists, |l| l.id.as_str());
+
+                    // Also load placements to fix factions there too
+                    let p_reader = JsonlReader::<meta_agent::models::Placement>::for_entity(
+                        &storage,
+                        EntityType::Placement,
+                        &epoch_id,
+                    );
+                    let mut placements = p_reader.read_all().unwrap_or_default();
+                    placements = dedup_by_id(placements, |p| p.id.as_str());
+
+                    println!(
+                        "=== Re-parsing units from raw_text (epoch: {}) ===",
+                        epoch_id
+                    );
+                    println!("Army lists: {}", lists.len());
+                    println!("Placements: {}\n", placements.len());
+
+                    let mut updated = 0u32;
+                    let mut factions_fixed = 0u32;
+                    let mut skipped_empty = 0u32;
+                    let mut skipped_no_parse = 0u32;
+
+                    // Build a map of player_name -> detected chapter for placement fixes
+                    let mut player_chapter: std::collections::HashMap<String, String> =
+                        std::collections::HashMap::new();
+
+                    for list in &mut lists {
+                        if list.raw_text.trim().is_empty() {
+                            skipped_empty += 1;
+                            continue;
+                        }
+
+                        // Detect chapter from raw text
+                        let is_generic_sm = list.faction == "Space Marines (Astartes)"
+                            || list.faction == "Space Marines"
+                            || list.faction == "Adeptus Astartes";
+                        if is_generic_sm {
+                            if let Some(chapter) = detect_chapter_from_raw_text(&list.raw_text) {
+                                if !dry_run {
+                                    list.faction = chapter.to_string();
+                                }
+                                if let Some(name) = &list.player_name {
+                                    player_chapter
+                                        .insert(name.trim().to_lowercase(), chapter.to_string());
+                                }
+                                factions_fixed += 1;
+                                println!(
+                                    "  Chapter: {} -> {}",
+                                    list.player_name.as_deref().unwrap_or("?"),
+                                    chapter
+                                );
+                            }
+                        }
+
+                        let new_units = parse_units_from_raw_text(&list.raw_text);
+                        if new_units.is_empty() {
+                            skipped_no_parse += 1;
+                            continue;
+                        }
+                        let has_new_data = new_units
+                            .iter()
+                            .any(|u| !u.keywords.is_empty() || !u.wargear.is_empty());
+                        if has_new_data || list.units.is_empty() {
+                            let new_total: u32 = new_units.iter().filter_map(|u| u.points).sum();
+                            if !dry_run {
+                                list.units = new_units;
+                                if new_total > 0 {
+                                    list.total_points = new_total;
+                                }
+                            }
+                            updated += 1;
+                        }
+                    }
+
+                    // Fix placement factions using detected chapters
+                    let mut placements_fixed = 0u32;
+                    for p in &mut placements {
+                        let is_generic_sm = p.faction == "Space Marines (Astartes)"
+                            || p.faction == "Space Marines"
+                            || p.faction == "Adeptus Astartes";
+                        if is_generic_sm {
+                            let norm_name = p.player_name.trim().to_lowercase();
+                            if let Some(chapter) = player_chapter.get(&norm_name) {
+                                if !dry_run {
+                                    p.faction = chapter.clone();
+                                }
+                                placements_fixed += 1;
+                            }
+                        }
+                    }
+
+                    if !dry_run {
+                        // Back up and write army lists
+                        let src_path = storage
+                            .normalized_dir()
+                            .join(&epoch_id)
+                            .join("army_lists.jsonl");
+                        let bak_path = src_path.with_extension("jsonl.pre-reparse.bak");
+                        if src_path.exists() {
+                            std::fs::copy(&src_path, &bak_path).expect("Failed to create backup");
+                            println!("Backed up lists to {:?}", bak_path);
+                        }
+                        let writer = JsonlWriter::<ArmyList>::for_entity(
+                            &storage,
+                            EntityType::ArmyList,
+                            &epoch_id,
+                        );
+                        writer.write_all(&lists).expect("Failed to write lists");
+
+                        // Write placements if any were fixed
+                        if placements_fixed > 0 {
+                            let p_src = storage
+                                .normalized_dir()
+                                .join(&epoch_id)
+                                .join("placements.jsonl");
+                            let p_bak = p_src.with_extension("jsonl.pre-reparse.bak");
+                            if p_src.exists() {
+                                std::fs::copy(&p_src, &p_bak).expect("Failed to backup placements");
+                                println!("Backed up placements to {:?}", p_bak);
+                            }
+                            let p_writer = JsonlWriter::<meta_agent::models::Placement>::for_entity(
+                                &storage,
+                                EntityType::Placement,
+                                &epoch_id,
+                            );
+                            p_writer
+                                .write_all(&placements)
+                                .expect("Failed to write placements");
+                        }
+                    }
+
+                    println!("\nUnits updated:        {}", updated);
+                    println!(
+                        "Factions reclassified: {} lists, {} placements",
+                        factions_fixed, placements_fixed
+                    );
+                    println!("Skipped (empty):      {}", skipped_empty);
+                    println!("Skipped (no parse):   {}", skipped_no_parse);
+                    if dry_run {
+                        println!("(dry run — no data written)");
                     }
                 }
                 DebugAction::TestIngest {
@@ -1386,6 +1825,276 @@ async fn main() -> Result<()> {
                 grand_l_total, grand_l_changed
             );
             if dry_run {
+                println!("\n(dry run — no data written to disk)");
+            }
+        }
+        Commands::FetchPairings { epoch, dry_run } => {
+            let storage = StorageConfig::new(std::path::PathBuf::from(&cli.data_dir));
+
+            let epoch_id = epoch.unwrap_or_else(|| {
+                let sig = read_significant_events(&storage).unwrap_or_default();
+                if sig.is_empty() {
+                    "current".to_string()
+                } else {
+                    let mapper = EpochMapper::from_significant_events(&sig);
+                    mapper
+                        .current_epoch()
+                        .map(|e| e.id.as_str().to_string())
+                        .unwrap_or_else(|| "current".to_string())
+                }
+            });
+
+            println!("=== Fetch Pairings (epoch: {}) ===\n", epoch_id);
+
+            // Load events
+            let events: Vec<meta_agent::models::Event> =
+                JsonlReader::for_entity(&storage, EntityType::Event, &epoch_id)
+                    .read_all()
+                    .unwrap_or_default();
+            let events = dedup_by_id(events, |e| e.id.as_str());
+
+            // Filter to BCP events only
+            let bcp_events: Vec<&meta_agent::models::Event> =
+                events.iter().filter(|e| e.source_name == "bcp").collect();
+
+            println!("Total events: {}", events.len());
+            println!("BCP events:   {}\n", bcp_events.len());
+
+            if bcp_events.is_empty() {
+                println!("No BCP events found. Pairings can only be fetched for BCP events.");
+                return Ok(());
+            }
+
+            // Load existing pairings for dedup
+            let existing_pairings: Vec<meta_agent::models::Pairing> =
+                JsonlReader::for_entity(&storage, EntityType::Pairing, &epoch_id)
+                    .read_all()
+                    .unwrap_or_default();
+            let existing_event_ids: std::collections::HashSet<String> = existing_pairings
+                .iter()
+                .map(|p| p.event_id.as_str().to_string())
+                .collect();
+
+            // Create BCP client
+            let bcp_fetcher = Fetcher::new(FetcherConfig {
+                cache_dir: storage.raw_dir(),
+                extra_headers: meta_agent::sync::bcp::bcp_headers_authenticated().await,
+                ..Default::default()
+            })
+            .expect("Failed to create BCP fetcher");
+            let bcp_client = meta_agent::sync::bcp::BcpClient::new(
+                bcp_fetcher,
+                "https://newprod-api.bestcoastpairings.com/v1".to_string(),
+                1,
+            );
+
+            let mut total_pairings = 0u32;
+            let mut events_processed = 0u32;
+
+            for (idx, event) in bcp_events.iter().enumerate() {
+                // Skip events that already have pairings
+                if existing_event_ids.contains(event.id.as_str()) {
+                    println!(
+                        "[{}/{}] Skipping {} (pairings already exist)",
+                        idx + 1,
+                        bcp_events.len(),
+                        event.name
+                    );
+                    continue;
+                }
+
+                // Extract BCP event ID from source_url
+                let bcp_event_id = event.source_url.rsplit('/').next().unwrap_or("");
+                if bcp_event_id.is_empty() {
+                    println!(
+                        "[{}/{}] Skipping {} (no BCP event ID in URL)",
+                        idx + 1,
+                        bcp_events.len(),
+                        event.name
+                    );
+                    continue;
+                }
+
+                println!(
+                    "[{}/{}] Fetching pairings for {}...",
+                    idx + 1,
+                    bcp_events.len(),
+                    event.name
+                );
+
+                // Rate limit
+                tokio::time::sleep(Duration::from_secs(2)).await;
+
+                match bcp_client.fetch_pairings(bcp_event_id).await {
+                    Ok(bcp_pairings) => {
+                        let epoch_entity_id =
+                            Some(meta_agent::models::EntityId::from(epoch_id.as_str()));
+                        let model_pairings = meta_agent::sync::convert::pairings_from_bcp(
+                            &bcp_pairings,
+                            &event.id,
+                            epoch_entity_id,
+                        );
+
+                        println!(
+                            "  Got {} pairings ({} converted)",
+                            bcp_pairings.len(),
+                            model_pairings.len()
+                        );
+
+                        if !dry_run && !model_pairings.is_empty() {
+                            let writer = JsonlWriter::<meta_agent::models::Pairing>::for_entity(
+                                &storage,
+                                EntityType::Pairing,
+                                &epoch_id,
+                            );
+                            writer
+                                .append_batch(&model_pairings)
+                                .expect("Failed to write pairings");
+                        }
+                        total_pairings += model_pairings.len() as u32;
+                        events_processed += 1;
+                    }
+                    Err(e) => {
+                        println!("  Error: {}", e);
+                    }
+                }
+            }
+
+            println!("\n=== Results ===");
+            println!("Events processed: {}", events_processed);
+            println!("Pairings fetched: {}", total_pairings);
+            if dry_run {
+                println!("(dry run — no data written to disk)");
+            }
+        }
+        Commands::LinkLists { epoch, dry_run } => {
+            let storage = StorageConfig::new(std::path::PathBuf::from(&cli.data_dir));
+
+            let epoch_id = epoch.unwrap_or_else(|| {
+                let sig = read_significant_events(&storage).unwrap_or_default();
+                if sig.is_empty() {
+                    "current".to_string()
+                } else {
+                    let mapper = EpochMapper::from_significant_events(&sig);
+                    mapper
+                        .current_epoch()
+                        .map(|e| e.id.as_str().to_string())
+                        .unwrap_or_else(|| "current".to_string())
+                }
+            });
+
+            println!("=== Link Lists (epoch: {}) ===\n", epoch_id);
+
+            // Load all entities
+            let events: Vec<meta_agent::models::Event> =
+                JsonlReader::for_entity(&storage, EntityType::Event, &epoch_id)
+                    .read_all()
+                    .unwrap_or_default();
+            let events = dedup_by_id(events, |e| e.id.as_str());
+
+            let placements: Vec<meta_agent::models::Placement> =
+                JsonlReader::for_entity(&storage, EntityType::Placement, &epoch_id)
+                    .read_all()
+                    .unwrap_or_default();
+            let mut placements = dedup_by_id(placements, |p| p.id.as_str());
+
+            let lists: Vec<ArmyList> =
+                JsonlReader::for_entity(&storage, EntityType::ArmyList, &epoch_id)
+                    .read_all()
+                    .unwrap_or_default();
+            let mut lists = dedup_by_id(lists, |l| l.id.as_str());
+
+            println!("Events:     {}", events.len());
+            println!("Placements: {}", placements.len());
+            println!("Lists:      {}\n", lists.len());
+
+            // Build lookup: event source_url → event_id
+            let url_to_event_id: std::collections::HashMap<String, meta_agent::models::EventId> =
+                events
+                    .iter()
+                    .map(|e| (e.source_url.clone(), e.id.clone()))
+                    .collect();
+
+            // 1. Set event_id on lists that don't have one
+            let mut lists_linked = 0u32;
+            for list in &mut lists {
+                if list.event_id.is_none() {
+                    if let Some(ref source_url) = list.source_url {
+                        if let Some(event_id) = url_to_event_id.get(source_url) {
+                            list.event_id = Some(event_id.clone());
+                            lists_linked += 1;
+                        }
+                    }
+                }
+            }
+
+            // 2. Build per-event name→list_id map, then set list_id on placements
+            let mut placements_linked = 0u32;
+            let name_to_list: std::collections::HashMap<
+                (String, String),
+                meta_agent::models::ArmyListId,
+            > = lists
+                .iter()
+                .filter_map(|l| {
+                    let event_id = l.event_id.as_ref()?.as_str().to_string();
+                    let name = meta_agent::sync::normalize_player_name(l.player_name.as_deref()?);
+                    Some(((event_id, name), l.id.clone()))
+                })
+                .collect();
+
+            for p in &mut placements {
+                if p.list_id.is_none() {
+                    let key = (
+                        p.event_id.as_str().to_string(),
+                        meta_agent::sync::normalize_player_name(&p.player_name),
+                    );
+                    if let Some(list_id) = name_to_list.get(&key) {
+                        p.list_id = Some(list_id.clone());
+                        placements_linked += 1;
+                    }
+                }
+            }
+
+            println!("Lists with event_id set:     {}", lists_linked);
+            println!("Placements with list_id set: {}", placements_linked);
+
+            if !dry_run {
+                // Back up existing files
+                let placement_path = storage
+                    .normalized_dir()
+                    .join(&epoch_id)
+                    .join("placements.jsonl");
+                let list_path = storage
+                    .normalized_dir()
+                    .join(&epoch_id)
+                    .join("army_lists.jsonl");
+
+                if placement_path.exists() {
+                    let bak = placement_path.with_extension("jsonl.pre-link.bak");
+                    std::fs::copy(&placement_path, &bak).ok();
+                }
+                if list_path.exists() {
+                    let bak = list_path.with_extension("jsonl.pre-link.bak");
+                    std::fs::copy(&list_path, &bak).ok();
+                }
+
+                let p_writer = JsonlWriter::<meta_agent::models::Placement>::for_entity(
+                    &storage,
+                    EntityType::Placement,
+                    &epoch_id,
+                );
+                p_writer
+                    .write_all(&placements)
+                    .expect("Failed to write placements");
+
+                let l_writer =
+                    JsonlWriter::<ArmyList>::for_entity(&storage, EntityType::ArmyList, &epoch_id);
+                l_writer
+                    .write_all(&lists)
+                    .expect("Failed to write army lists");
+
+                println!("\nData written to disk.");
+            } else {
                 println!("\n(dry run — no data written to disk)");
             }
         }
