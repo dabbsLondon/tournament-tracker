@@ -10,7 +10,7 @@
 # Stage 1: Use the official pre-built cargo-chef image (avoids compiling
 # cargo-chef from source, which is slow and fragile in multi-arch builds).
 # -----------------------------------------------------------------------------
-FROM lukemathwalker/cargo-chef:latest-rust-stable-bookworm AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-bookworm AS chef
 WORKDIR /app
 
 # -----------------------------------------------------------------------------
