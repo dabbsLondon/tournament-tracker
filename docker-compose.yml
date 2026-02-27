@@ -1,0 +1,56 @@
+# =============================================================================
+# docker-compose.yml — Local development stack
+#
+# Usage:
+#   cp .env.example .env          # fill in your API keys
+#   docker compose up --build     # first run (builds images)
+#   docker compose up             # subsequent runs (uses cached images)
+#
+# Services:
+#   frontend  →  http://localhost:8080   (Nginx — serves UI + proxies /api/)
+#   backend   →  http://localhost:3000   (Rust API — also accessible directly)
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Backend — Rust / Axum API server
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: meta-agent-backend:local
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist scraped/normalized data between container restarts
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      # Copy .env.example → .env and fill in your credentials before running
+      - .env
+    environment:
+      RUST_LOG: info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/meta/factions"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Frontend — Nginx serving static assets, proxying /api/ to backend
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: meta-agent-frontend:local
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
